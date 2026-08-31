@@ -1,0 +1,39 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+backend/.venv/
+*.egg-info/
+
+# env / secrets
+.env
+.env.local
+
+# database
+*.db
+*.sqlite3
+
+# node
+node_modules/
+dist/
+.vite/
+
+# scraped + derived data (regenerate with the scrapers)
+raw_formation/
+raw_opal/
+raw_reussir/
+raw/
+.hf-cache/
+
+# os
+.DS_Store
+
+# local editor/agent settings
+.claude/settings.local.json
+
+# derived dedup output + Excel review artefacts (regenerate from the *.jsonl)
+questions_*/*_semantic.jsonl
+questions_*/*_no_semantic.jsonl
+questions_*/*_review.jsonl
+*.xlsx
+~$*
