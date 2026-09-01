@@ -1,3 +1,4 @@
+react, fastAPI
 Phase 0:
 set up the platform. 
   1. index page

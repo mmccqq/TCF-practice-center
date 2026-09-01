@@ -31,7 +31,7 @@ class User(Base):
     auth_provider: Mapped[str] = mapped_column(String(20), default="local")
     google_sub: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow) # default = utcnow() will call the function immediately when the model is defined.
 
     attempts: Mapped[List["Attempt"]] = relationship(back_populates="user",
                                                      cascade="all, delete-orphan")
