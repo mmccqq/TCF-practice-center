@@ -1,0 +1,19 @@
+# Data pipeline: scrapers + the Excel round-trip.
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements-data.txt
+#
+# Direct imports only - transitive deps (certifi, soupsieve, urllib3, ...) are
+# resolved by pip. Run `pip freeze > requirements-data.lock` if you ever need
+# an exact, reproducible pin set.
+
+# scraper_formation.py, scraper_opal.py, scraper_reussir.py
+requests>=2.32
+beautifulsoup4>=4.13
+lxml>=5.3
+# scraper_opal.py imports urllib3 directly (urllib3.util.retry.Retry). requests
+# already pulls it in, but relying on that would break if requests ever changed
+# its HTTP backend - so it is declared explicitly.
+urllib3>=2.0
+
+# jsonl_to_xlsx.py, xlsx_to_jsonl.py
+pandas>=2.2
+openpyxl>=3.1

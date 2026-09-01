@@ -10,3 +10,40 @@ trap 'kill 0' EXIT
 (cd backend && .venv/bin/uvicorn app.main:app --reload --port 8000) &
 (cd frontend && npm run dev) &
 wait
+
+
+# Start
+#   │
+#   ▼
+# Enable strict error handling
+#   │
+#   ▼
+# Go to the script's directory
+#   │
+#   ▼
+# Check Python/Uvicorn environment
+#   │
+#   ├── Missing → Print setup instructions → Exit
+#   │
+#   ▼
+# Check frontend node_modules
+#   │
+#   ├── Missing → Print npm install instructions → Exit
+#   │
+#   ▼
+# Register cleanup handler
+#   │
+#   ▼
+# Start backend in background
+#   │
+#   ▼
+# Start frontend in background
+#   │
+#   ▼
+# Wait
+#   │
+#   ▼
+# Ctrl-C / processes exit
+#   │
+#   ▼
+# trap runs → kill background processes

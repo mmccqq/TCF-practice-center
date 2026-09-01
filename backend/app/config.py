@@ -19,7 +19,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # absolute, so the file is found no matter which directory the process
+    # was launched from (uvicorn from backend/, seed.py from the repo root)
+    model_config = SettingsConfigDict(env_file=BACKEND_DIR / ".env", extra="ignore")
 
     env: str = "development"
     database_url: str = f"sqlite:///{BACKEND_DIR / 'tcf.db'}"

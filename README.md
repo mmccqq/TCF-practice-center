@@ -36,6 +36,25 @@ no CORS setup or hardcoded backend URL is needed in development.
 
 API docs: http://localhost:8000/docs
 
+## Dependencies
+
+Three separate sets, deliberately not merged — the API must not ship PyTorch.
+
+| file | for | install into |
+|---|---|---|
+| `backend/requirements.txt` | FastAPI app (this is the deploy manifest) | `backend/.venv` |
+| `requirements-data.txt` | scrapers + Excel round-trip | `.venv` |
+| `requirements-ml.txt` | optional embedding tier of `deduplication.py` (~340 MB) | `.venv` |
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements-data.txt      # scrapers
+.venv/bin/pip install -r requirements-ml.txt        # only for semantic dedup
+```
+
+These list direct imports with lower bounds. For an exact, reproducible pin set
+(a lockfile), use `pip freeze > requirements-data.lock`.
+
 ## Tests
 
 ```bash
