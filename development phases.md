@@ -8,10 +8,13 @@ set up the platform.
   2. task2 and task3 page, list all questions, sorted by date by default
   3. database
   4. user sign-up and login. support google sign-up
-Phase 2:
+Phase 1:
+1. no need of sources filter on the questionList page.
+
 1. high frequency bank for 6 months and 12 months
 2. progress tracking for each user and each question(practiced or not)
-Phase 3:
+
+Phase 2:
 material support
 1. task2 
    1. question template

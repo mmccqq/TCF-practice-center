@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
 from .db import Base, engine
@@ -43,3 +46,22 @@ app.include_router(auth_router.router)
 @app.get("/api/health")
 def health() -> dict:
     return {"status": "ok", "env": settings.env, "google_auth": settings.google_enabled}
+
+
+# --------------------------------------------------------------- frontend ----
+# In production the React bundle is served by this same process, so the whole
+# app lives on one origin: no CORS, and the relative /api/auth/google/login
+# link in the UI resolves without knowing the backend's address.
+#
+# This block MUST stay at the bottom of the file. Routes are matched in
+# registration order, and the catch-all below matches everything - any route
+# declared after it is unreachable.
+DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+
+if DIST.is_dir():
+    app.mount("/assets", StaticFiles(directory=DIST / "assets"), name="assets")
+
+    @app.get("/{full_path:path}")
+    def spa(full_path: str):
+        # React Router owns every non-/api path: /login, /questions, ...
+        return FileResponse(DIST / "index.html")

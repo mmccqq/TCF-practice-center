@@ -124,13 +124,11 @@ export default function QuestionList({ tache }) {
                   <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-700">
                     {periodLabel(q.period)}
                   </span>
-                  <span>{q.source}</span>
                   {q.occurrences > 1 && (
                     <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800">
                       seen {q.occurrences}&times;
                     </span>
                   )}
-                  <span className="ml-auto font-mono text-[11px] text-slate-400">{q.id}</span>
                 </div>
                 <p className="leading-relaxed">{q.text}</p>
               </li>

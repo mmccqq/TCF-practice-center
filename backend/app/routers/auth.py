@@ -116,7 +116,8 @@ def google_login(request: Request) -> RedirectResponse:
         "prompt": "select_account",
     }
     resp = RedirectResponse(f"{GOOGLE_AUTH}?{urlencode(params)}")
-    resp.set_cookie("g_state", state, max_age=600, httponly=True, samesite="lax")
+    resp.set_cookie("g_state", state, max_age=600, httponly=True,
+                samesite="lax", secure=settings.env == "production")
     return resp
 
 

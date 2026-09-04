@@ -1,0 +1,32 @@
+# Keep the build context small, and keep local state out of the image.
+# Patterns are matched against the whole path and `*` does not cross a `/`,
+# so anything that can live in a subdirectory needs the `**/` prefix:
+# `.env` alone would miss backend/.env, which is the file that actually exists.
+**/node_modules
+**/.venv
+**/__pycache__
+**/.pytest_cache
+
+# local SQLite database - the container must use DATABASE_URL (Neon), and a
+# tcf.db inside the image would let config.py silently fall back to it
+**/*.db
+**/*.sqlite3
+
+# local secrets: config.py reads backend/.env, so a copy in the image becomes
+# the fallback for any variable you forget to set on the host
+**/.env
+**/.env.local
+
+.git
+.gitignore
+
+# rebuilt by stage 1 of the Dockerfile; a stale macOS build must not overwrite it
+frontend/dist
+
+# scraped data and review artefacts - only seed.py needs these, and seeding is
+# run from your laptop against the remote database
+raw_formation/
+raw_opal/
+raw_reussir/
+*.xlsx
+.DS_Store
