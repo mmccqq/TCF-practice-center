@@ -267,6 +267,28 @@ def crawl(raw_dir: Path, limit: int | None, delay: float, force: bool) -> None:
 # stage 2: parse
 # --------------------------------------------------------------------------
 
+# Some months' "title" values carry the site's own list decoration. Seen so
+# far: a 🏴 bullet glued to the front (2025-11), and a "Theme → question"
+# layout (2025-02), sometimes with the theme missing so the arrow leads.
+# deduplication.fingerprint() strips symbols before hashing, so a decorated
+# title still collapses onto a clean duplicate - but where no duplicate
+# exists the decoration reaches the database and shows up in the UI.
+_LEADING_MARKER = re.compile(
+    r"^[\s•‣▪-◿←-⇿☀-➿"
+    r"\U0001f000-\U0001faff️]+"
+)
+
+
+def clean(s: str) -> str:
+    """Question text as a plain sentence: no bullet glyph, no arrow layout."""
+    s = s.replace("\xa0", " ")
+    s = _LEADING_MARKER.sub("", s)
+    # "Agence immobiliere → Vous souhaitez louer" reads as a theme followed by
+    # the prompt; a French colon keeps that reading without the markup.
+    s = re.sub(r"\s*→\s*", " : ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
 def parse_month(html: str, info: MonthInfo, source_url: str) -> list[Question]:
     """Parse one month's flight stream into Questions.
 
@@ -291,7 +313,7 @@ def parse_month(html: str, info: MonthInfo, source_url: str) -> list[Question]:
             tache = sujet.get("tache")
             if tache not in (2, 3):
                 continue                                # ignore anything unexpected
-            text = (sujet.get("title") or "").strip()
+            text = clean(sujet.get("title") or "")
             if not text:
                 continue
             seq[tache] += 1
@@ -414,6 +436,16 @@ def selftest() -> None:
     qs = parse_month(month_html, info, "https://example.test/aot-2026")
     assert [q.tache for q in qs] == [2, 2, 3, 3], "unknown tache should be dropped"
     assert qs[0].text == "Question tache 2 numero un."
+
+    # list decoration the site adds to some months must not reach the output
+    assert clean("🏴Je suis agent immobilier.") == "Je suis agent immobilier."
+    assert clean("→ Pensez-vous que oui ?") == "Pensez-vous que oui ?"
+    assert clean("Agence immobiliere → Vous souhaitez louer.") == \
+        "Agence immobiliere : Vous souhaitez louer."
+    assert clean("  Deux   espaces\xa0insecables. ") == "Deux espaces insecables."
+    # a leading « or - is part of the sentence, not decoration
+    assert clean("« Les jeunes lisent moins » : d'accord ?") == \
+        "« Les jeunes lisent moins » : d'accord ?"
     assert qs[2].sujet_id == 103
     assert all(q.year == 2026 and q.month == 8 and q.month_name == "aout" for q in qs), \
         "year/month must come from the hub, not each party's inconsistent 'date' text"

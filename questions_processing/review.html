@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<!--
+  Hand-review queue for deduplication.py's *_review.jsonl files.
+
+      python3 deduplication.py questions_*/tache2.jsonl --mode tfidf
+      open review.html          # then pick tache2_tfidf_review.jsonl
+
+  A single self-contained file on purpose: no build step, no server, no
+  dependency to keep current. It is a tool for the person maintaining the
+  question bank, not part of the deployed site, so it deliberately lives
+  outside frontend/ and never touches the API.
+
+  Everything runs in the browser. Decisions are kept in localStorage keyed by
+  the loaded file's name, so closing the tab mid-queue loses nothing, and
+  "Export" writes them back out as JSONL.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dedup review</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --ink: #16181d; --muted: #6b7280;
+    --line: #e3e6ea; --accent: #2563eb;
+    --merge: #0f7b4f; --merge-bg: #e7f6ee;
+    --reject: #b3261e; --reject-bg: #fdecea;
+    --add: #d6f0dd; --del: #fbdcd9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a; --card: #1c1f25; --ink: #e8eaed; --muted: #9aa2ad;
+      --line: #2c313a; --accent: #7aa2f7;
+      --merge: #6ee7a8; --merge-bg: #16311f;
+      --reject: #ff9c94; --reject-bg: #3a1a17;
+      --add: #1f4430; --del: #4a201d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+
+  header {
+    position: sticky; top: 0; z-index: 5;
+    background: var(--card); border-bottom: 1px solid var(--line);
+    padding: 12px 20px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+  }
+  header h1 { font-size: 15px; margin: 0 8px 0 0; font-weight: 650; }
+  .spacer { flex: 1; }
+  .counts { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .counts b { color: var(--ink); }
+  button, select, label.file {
+    font: inherit; padding: 6px 12px; border-radius: 7px;
+    border: 1px solid var(--line); background: var(--card); color: var(--ink);
+    cursor: pointer;
+  }
+  button:hover, label.file:hover { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; border-color: var(--line); }
+  input[type=file] { display: none; }
+
+  .bar { height: 3px; background: var(--line); }
+  .bar > div { height: 100%; background: var(--accent); width: 0; transition: width .15s; }
+
+  main { max-width: 1100px; margin: 0 auto; padding: 20px; }
+  .empty { color: var(--muted); text-align: center; padding: 80px 20px; }
+  .empty code { background: var(--card); padding: 2px 6px; border-radius: 4px; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-left-width: 4px;
+    border-radius: 10px; margin-bottom: 14px; padding: 14px 16px; outline: none;
+  }
+  .card:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px rgb(37 99 235 / .18); }
+  .card[data-decision="merge"]  { border-left-color: var(--merge);  background: var(--merge-bg); }
+  .card[data-decision="reject"] { border-left-color: var(--reject); background: var(--reject-bg); }
+  .card[data-decision=""]       { border-left-color: var(--line); }
+
+  .meta {
+    display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap;
+    color: var(--muted); font-size: 12.5px; margin-bottom: 10px;
+  }
+  .score {
+    font-variant-numeric: tabular-nums; font-weight: 700; font-size: 14px; color: var(--ink);
+  }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 720px) { .pair { grid-template-columns: 1fr; } }
+  .side { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--bg); }
+  .side h3 {
+    margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .side .id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+  .text { white-space: pre-wrap; }
+  ins { background: var(--add); text-decoration: none; border-radius: 3px; }
+  del { background: var(--del); text-decoration: none; border-radius: 3px; }
+
+  .actions { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+  .actions .verdict { margin-left: auto; font-size: 12.5px; color: var(--muted); }
+  button.merge[aria-pressed="true"]  { background: var(--merge);  border-color: var(--merge);  color: #fff; }
+  button.reject[aria-pressed="true"] { background: var(--reject); border-color: var(--reject); color: #fff; }
+
+  kbd {
+    font: 11px ui-monospace, Menlo, monospace; border: 1px solid var(--line);
+    border-bottom-width: 2px; border-radius: 4px; padding: 1px 5px; color: var(--muted);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Dedup review</h1>
+  <label class="file">
+    Load review .jsonl<input id="file" type="file" accept=".jsonl,.json,.txt">
+  </label>
+  <span id="filename" class="counts"></span>
+  <span class="spacer"></span>
+  <span class="counts" id="counts"></span>
+  <select id="filter" title="Which pairs to show">
+    <option value="all">All</option>
+    <option value="undecided">Undecided</option>
+    <option value="merge">Merged</option>
+    <option value="reject">Rejected</option>
+  </select>
+  <button id="export" disabled>Export decisions</button>
+  <button id="clear" disabled title="Forget every decision for this file">Reset</button>
+</header>
+<div class="bar"><div id="progress"></div></div>
+
+<main>
+  <div id="list"></div>
+  <div id="empty" class="empty">
+    <p>Pick a <code>*_review.jsonl</code> produced by <code>deduplication.py</code>, or drop it anywhere on this page.</p>
+    <p><kbd>j</kbd> / <kbd>k</kbd> move &nbsp; <kbd>m</kbd> merge &nbsp; <kbd>r</kbd> reject &nbsp; <kbd>u</kbd> undo</p>
+  </div>
+</main>
+
+<script>
+"use strict";
+
+// ---------------------------------------------------------------- state ----
+let pairs = [];        // rows from the jsonl, in file order
+let decisions = {};    // key -> "merge" | "reject"
+let storeKey = null;   // localStorage key for the loaded file
+
+// a_id/b_id identify a pair independently of its position, so decisions
+// survive a re-run of deduplication.py that reorders or re-scores the queue
+const keyOf = (p) => `${p.a_id}|${p.b_id}`;
+
+const $ = (id) => document.getElementById(id);
+
+// ----------------------------------------------------------- word diff ----
+// Plain LCS over whitespace-separated tokens. These texts are near-identical
+// by construction and only ~60 words long, so the O(n*m) table is trivial -
+// and seeing *which* words differ is the whole reason for a side-by-side view.
+function diffWords(a, b) {
+  const A = a.split(/(\s+)/), B = b.split(/(\s+)/);
+  const n = A.length, m = B.length;
+  const dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1
+                               : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const left = [], right = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (A[i] === B[j]) { left.push(["=", A[i]]); right.push(["=", B[j]]); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { left.push(["-", A[i++]]); }
+    else { right.push(["+", B[j++]]); }
+  }
+  while (i < n) left.push(["-", A[i++]]);
+  while (j < m) right.push(["+", B[j++]]);
+  return [left, right];
+}
+
+function renderDiff(parts) {
+  const frag = document.createDocumentFragment();
+  for (const [op, tok] of parts) {
+    // textContent everywhere: the questions are arbitrary scraped strings
+    if (op === "=") frag.append(document.createTextNode(tok));
+    else {
+      const el = document.createElement(op === "-" ? "del" : "ins");
+      el.textContent = tok;
+      frag.append(el);
+    }
+  }
+  return frag;
+}
+
+// -------------------------------------------------------------- render ----
+function side(label, id, parts) {
+  const box = document.createElement("div");
+  box.className = "side";
+  const h = document.createElement("h3");
+  h.textContent = label + " ";
+  const idEl = document.createElement("span");
+  idEl.className = "id";
+  idEl.textContent = id;
+  h.append(idEl);
+  const body = document.createElement("div");
+  body.className = "text";
+  body.append(renderDiff(parts));
+  box.append(h, body);
+  return box;
+}
+
+function card(p, index) {
+  const key = keyOf(p);
+  const el = document.createElement("article");
+  el.className = "card";
+  el.tabIndex = 0;
+  el.dataset.key = key;
+  el.dataset.index = index;
+  el.dataset.decision = decisions[key] || "";
+
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  const score = document.createElement("span");
+  score.className = "score";
+  score.textContent = Number(p.score).toFixed(4);
+  const pos = document.createElement("span");
+  pos.textContent = `#${index + 1} of ${pairs.length}`;
+  meta.append(score, pos);
+
+  const pair = document.createElement("div");
+  pair.className = "pair";
+  const [la, rb] = diffWords(p.a ?? "", p.b ?? "");
+  pair.append(side("A", p.a_id ?? "?", la), side("B", p.b_id ?? "?", rb));
+
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  const merge = document.createElement("button");
+  merge.className = "merge"; merge.textContent = "Merge";
+  const reject = document.createElement("button");
+  reject.className = "reject"; reject.textContent = "Reject";
+  const verdict = document.createElement("span");
+  verdict.className = "verdict";
+  merge.onclick = () => decide(key, "merge");
+  reject.onclick = () => decide(key, "reject");
+  actions.append(merge, reject, verdict);
+
+  el.append(meta, pair, actions);
+  paint(el);
+  return el;
+}
+
+function paint(el) {
+  const d = decisions[el.dataset.key] || "";
+  el.dataset.decision = d;
+  const [merge, reject] = el.querySelectorAll("button");
+  merge.setAttribute("aria-pressed", String(d === "merge"));
+  reject.setAttribute("aria-pressed", String(d === "reject"));
+  el.querySelector(".verdict").textContent =
+    d === "merge" ? "same question - merge" :
+    d === "reject" ? "different questions - keep both" : "undecided";
+}
+
+function visible() {
+  const f = $("filter").value;
+  return pairs
+    .map((p, i) => [p, i])
+    .filter(([p]) => {
+      const d = decisions[keyOf(p)] || "";
+      return f === "all" || (f === "undecided" ? d === "" : d === f);
+    });
+}
+
+function render() {
+  const list = $("list");
+  list.textContent = "";
+  const rows = visible();
+  for (const [p, i] of rows) list.append(card(p, i));
+  $("empty").style.display = pairs.length === 0 ? "" : "none";
+  if (pairs.length && rows.length === 0) {
+    const none = document.createElement("p");
+    none.className = "empty";
+    none.textContent = "Nothing matches this filter.";
+    list.append(none);
+  }
+  updateCounts();
+}
+
+function updateCounts() {
+  const vals = pairs.map((p) => decisions[keyOf(p)] || "");
+  const m = vals.filter((v) => v === "merge").length;
+  const r = vals.filter((v) => v === "reject").length;
+  const done = m + r;
+  $("counts").innerHTML = pairs.length
+    ? `<b>${done}</b>/${pairs.length} decided &nbsp;·&nbsp; ${m} merge &nbsp;·&nbsp; ${r} reject`
+    : "";
+  $("progress").style.width = pairs.length ? `${(done / pairs.length) * 100}%` : "0";
+  $("export").disabled = done === 0;
+  $("clear").disabled = done === 0;
+}
+
+// ------------------------------------------------------------ decisions ----
+function decide(key, verdict) {
+  // clicking the active verdict again clears it, so a misclick is one click
+  if (decisions[key] === verdict) delete decisions[key];
+  else decisions[key] = verdict;
+  save();
+
+  const el = document.querySelector(`.card[data-key="${CSS.escape(key)}"]`);
+  if (!el) return;
+  if ($("filter").value === "all") {
+    paint(el);
+    updateCounts();
+    focusNext(el);            // keep moving down the queue
+  } else {
+    render();                 // the card no longer belongs in this filter
+  }
+}
+
+function focusNext(el) {
+  const next = el.nextElementSibling;
+  if (next && next.classList.contains("card")) next.focus();
+}
+
+function save() {
+  if (storeKey) localStorage.setItem(storeKey, JSON.stringify(decisions));
+}
+
+// --------------------------------------------------------------- loading ----
+function loadText(name, text) {
+  const rows = [];
+  text.split("\n").forEach((line, n) => {
+    line = line.trim();
+    if (!line) return;
+    try { rows.push(JSON.parse(line)); }
+    catch { console.warn(`line ${n + 1}: not valid JSON, skipped`); }
+  });
+  if (!rows.length) { alert(`${name}: no JSON lines found.`); return; }
+  if (!("a_id" in rows[0] && "b_id" in rows[0])) {
+    alert(`${name}: this does not look like a *_review.jsonl - ` +
+          `expected fields score / a / b / a_id / b_id.`);
+    return;
+  }
+  pairs = rows;
+  storeKey = `tcf.review.${name}`;
+  decisions = JSON.parse(localStorage.getItem(storeKey) || "{}");
+  $("filename").textContent = name;
+  render();
+}
+
+$("file").onchange = (e) => {
+  const f = e.target.files[0];
+  if (f) f.text().then((t) => loadText(f.name, t));
+};
+
+// drag-and-drop anywhere, since file:// pages cannot fetch a path themselves
+document.addEventListener("dragover", (e) => e.preventDefault());
+document.addEventListener("drop", (e) => {
+  e.preventDefault();
+  const f = e.dataTransfer.files[0];
+  if (f) f.text().then((t) => loadText(f.name, t));
+});
+
+$("filter").onchange = render;
+
+$("clear").onclick = () => {
+  if (!confirm("Forget every decision recorded for this file?")) return;
+  decisions = {};
+  save();
+  render();
+};
+
+$("export").onclick = () => {
+  // one line per *decided* pair; undecided ones are simply absent, so an
+  // export can be appended to over several sittings without contradicting itself
+  const lines = pairs
+    .filter((p) => decisions[keyOf(p)])
+    .map((p) => JSON.stringify({
+      a_id: p.a_id, b_id: p.b_id,
+      score: p.score,
+      decision: decisions[keyOf(p)],
+    }));
+  const stem = ($("filename").textContent || "review").replace(/\.jsonl$/, "");
+  const url = URL.createObjectURL(
+    new Blob([lines.join("\n") + "\n"], { type: "application/x-ndjson" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${stem}_decisions.jsonl`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+// ------------------------------------------------------------- keyboard ----
+document.addEventListener("keydown", (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const cards = [...document.querySelectorAll(".card")];
+  if (!cards.length) return;
+  const cur = document.activeElement.closest?.(".card");
+  const at = cur ? cards.indexOf(cur) : -1;
+
+  if (e.key === "j" || e.key === "ArrowDown") {
+    e.preventDefault(); cards[Math.min(at + 1, cards.length - 1)].focus();
+  } else if (e.key === "k" || e.key === "ArrowUp") {
+    e.preventDefault(); cards[Math.max(at - 1, 0)].focus();
+  } else if (cur && (e.key === "m" || e.key === "r")) {
+    e.preventDefault(); decide(cur.dataset.key, e.key === "m" ? "merge" : "reject");
+  } else if (cur && e.key === "u") {
+    e.preventDefault();
+    delete decisions[cur.dataset.key];
+    save(); paint(cur); updateCounts();
+  }
+});
+</script>
+</body>
+</html>

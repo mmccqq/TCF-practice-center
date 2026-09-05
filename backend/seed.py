@@ -3,7 +3,11 @@
 
     backend/.venv/bin/python backend/seed.py                  # all sources
     backend/.venv/bin/python backend/seed.py --reset          # wipe first
-    backend/.venv/bin/python backend/seed.py questions_reussir/tache2.jsonl
+    backend/.venv/bin/python backend/seed.py questions_processing/questions_reussir/tache2.jsonl
+
+Inputs default to questions_processing/questions_*/tache[23].jsonl - the
+scrapers, deduplication.py and their JSONL output all live under
+questions_processing/. Explicit file arguments bypass that entirely.
 
 Idempotent: rows are upserted on the scraper id, so re-running after a
 re-scrape updates in place instead of duplicating.
@@ -23,21 +27,26 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent        # backend/
+PROJECT = ROOT.parent
+# the scrapers, deduplication.py and their JSONL output all live together
+DATA_DIR = PROJECT / "questions_processing"
+
 sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT.parent))          # to import deduplication.py
+sys.path.insert(0, str(PROJECT))              # to import questions_processing.*
 
 from app.db import Base, SessionLocal, engine   # noqa: E402
 from app.models import Question                 # noqa: E402
 
 try:
-    from deduplication import fingerprint, normalize   # noqa: E402
+    from questions_processing.deduplication import fingerprint, normalize   # noqa: E402
 except ImportError:                                     # pragma: no cover
     print("! deduplication.py not importable - falling back to raw text keys",
           file=sys.stderr)
     normalize = lambda s: " ".join(s.split())           # noqa: E731
     fingerprint = normalize                             # noqa: E731
 
+# relative to DATA_DIR, not the repo root
 DEFAULT_GLOBS = ["questions_formation/tache*.jsonl",
                  "questions_opal/tache*.jsonl",
                  "questions_reussir/tache*.jsonl"]
@@ -93,22 +102,25 @@ def main() -> None:
     ap.add_argument("--reset", action="store_true", help="delete existing questions first")
     args = ap.parse_args()
 
-    project = ROOT.parent
     if args.files:
         paths = [Path(f) for f in args.files]
     else:
+        if not DATA_DIR.is_dir():
+            sys.exit(f"{DATA_DIR} not found - the scrapers and their output are "
+                     f"expected there; pass file paths explicitly to override")
         paths = sorted({Path(p) for g in DEFAULT_GLOBS
-                        for p in glob.glob(str(project / g))})
+                        for p in glob.glob(str(DATA_DIR / g))})
         paths = [p for p in paths if wanted(p)]
     missing = [p for p in paths if not p.exists()]
     if missing:
         sys.exit(f"not found: {missing}")
     if not paths:
-        sys.exit("no input files found - run the scrapers' `parse` step first")
+        sys.exit(f"no input files found under {DATA_DIR} - run the scrapers' "
+                 f"`parse` step first")
 
     print(f"reading {len(paths)} file(s):")
     for p in paths:
-        print("   ", p.relative_to(project) if p.is_absolute() else p)
+        print("   ", p.relative_to(PROJECT) if p.is_absolute() else p)
 
     records = collect(paths)
     Base.metadata.create_all(bind=engine)

@@ -17,3 +17,8 @@ urllib3>=2.0
 # jsonl_to_xlsx.py, xlsx_to_jsonl.py
 pandas>=2.2
 openpyxl>=3.1
+
+# deduplication.py --mode tfidf. pandas already pulls numpy in, but this file
+# declares direct imports, and --mode embed additionally needs
+# `pip install sentence-transformers` (~2 GB, deliberately not pinned here).
+numpy>=1.26

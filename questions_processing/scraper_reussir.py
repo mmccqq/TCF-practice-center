@@ -161,6 +161,52 @@ def crawl(raw_dir: Path, limit: int | None, delay: float, force: bool) -> None:
 # stage 2: parse
 # --------------------------------------------------------------------------
 
+def bold_group(node: Tag) -> tuple[str, list[Tag]]:
+    """Text of the whole bold run `node` belongs to, plus the tags it covers.
+
+    reussir's editor regularly breaks one question across several <strong>
+    tags inside a single <p>: at a <br> line wrap, or wherever a colour <span>
+    was applied mid-sentence. Reading each <strong> on its own truncates the
+    question at the first break and then discards the tail, because the
+    remainder ("tourisme qui vous accueille.") is too short to look like a
+    subject. So the run is read as one unit.
+
+    Joining rule, which is the only one that gets both real shapes right:
+    pieces are concatenated with no separator, and each <br> contributes one
+    space. The document's own trailing spaces do the rest.
+
+        "Je suis " + "un(e" + ") ami(e)"        -> "Je suis un(e) ami(e)"
+        "...l'office du" + <br> + "tourisme..." -> "...l'office du tourisme..."
+
+    Anything not inside a <strong> is skipped, so a "Sujet 2" label sharing
+    the paragraph cannot leak into the text. If such a marker is present the
+    grouping is abandoned altogether and the caller falls back to this one
+    tag - a paragraph holding two separate subjects must not be fused.
+    """
+    block = node.find_parent(["p", "li", "td"])
+    if block is None:
+        return clean(node.get_text("")), [node]
+
+    members = [t for t in block.find_all(["strong", "b"])
+               if not t.find_parent(["strong", "b"])]
+    if len(members) < 2 or not any(m is node for m in members):
+        return clean(node.get_text("")), [node]
+
+    parts: list[str] = []
+    for el in block.descendants:
+        if isinstance(el, Tag):
+            if el.name == "br":
+                parts.append(" ")
+        elif el.find_parent(["strong", "b"]) is not None:
+            parts.append(str(el))
+        elif clean(str(el)) and (RE_TACHE.match(clean(str(el)))
+                                 or RE_PARTIE.match(clean(str(el)))
+                                 or RE_SUJET.match(clean(str(el)))):
+            return clean(node.get_text("")), [node]     # two subjects in one <p>
+
+    return clean("".join(parts)), members
+
+
 def parse_month(html: str, slug: str, source_url: str) -> list[Question]:
     """
     Walk the document in reading order and run a small state machine.
@@ -193,7 +239,13 @@ def parse_month(html: str, slug: str, source_url: str) -> list[Question]:
             # mark nested bold tags so we don't emit the same text twice
             for inner in node.find_all(["strong", "b"]):
                 consumed.add(id(inner))
-            text = clean(node.get_text(" "))
+            # ...and the siblings absorbed into this one, for the same reason:
+            # a question split across several <strong> tags is one question
+            text, group = bold_group(node)
+            for member in group:
+                consumed.add(id(member))
+                for inner in member.find_all(["strong", "b"]):
+                    consumed.add(id(inner))
             # a real subject is a sentence; short bold runs are labels/emphasis
             if tache in (2, 3) and sujet is not None and len(text) > 40:
                 key = (tache, partie, sujet, text)
@@ -288,6 +340,13 @@ FIXTURE = """
 <div><span>Partie 3</span></div>
 <div><p>Sujet 1</p><p><strong>Je suis un(e) collègue. Vous me posez des questions
    pour obtenir des informations (itinéraire, horaires, etc.).</strong></p></div>
+<div><span>Partie 5</span></div>
+<!-- the editor's two real ways of splitting one question across <strong> tags:
+     a <br> line wrap (needs a space) and a mid-word colour span (needs none) -->
+<div><p>Sujet 1</p><p><strong>Je suis l'employé(e) de l'office du</strong><br /><strong>tourisme
+   qui vous accueille. Posez-moi des questions (prix, horaires, etc.).</strong></p></div>
+<div><p>Sujet 2</p><p><strong>Je suis votre voisin(e). V</strong><span><strong>ous me posez
+   des questions sur le quartier (services, magasins, etc.)</strong></span><strong>.</strong></p></div>
 <h2>Tâche 3</h2>
 <div><span>Partie 1</span></div>
 <div><p>Sujet 1</p><p><strong>Selon vous, est-il important qu'une entreprise
@@ -301,8 +360,20 @@ FIXTURE = """
 
 def selftest() -> None:
     qs = parse_month(FIXTURE, "aout-2026", "https://example.test/")
-    assert [q.tache for q in qs] == [2, 2, 2, 3], "state machine produced the wrong hierarchy"
+    assert [q.tache for q in qs] == [2, 2, 2, 2, 2, 3], "state machine produced the wrong hierarchy"
     assert all("pied de page" not in q.text for q in qs), "footer leaked in"
+
+    # A question split across several <strong> tags is one question: the tail
+    # must survive, and the two joining rules must not contaminate each other.
+    by_text = {q.id: q.text for q in qs}
+    br_split = by_text["0320260820501"]
+    assert br_split.endswith("(prix, horaires, etc.)."), br_split
+    assert "du tourisme" in br_split, f"<br> must join with a space: {br_split}"
+    span_split = by_text["0320260820502"]
+    assert "voisin(e). Vous me posez" in span_split, \
+        f"a mid-word split must join with nothing: {span_split}"
+    assert span_split.endswith("(services, magasins, etc.)."), \
+        f"trailing punctuation in its own <strong> was dropped: {span_split}"
     assert qs[0].month == 8 and qs[0].year == 2026
     assert all(q.source == SOURCE for q in qs), "source field not stamped"
     assert qs[0].id == "0320260820401", qs[0].id

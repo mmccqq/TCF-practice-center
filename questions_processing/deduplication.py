@@ -6,11 +6,24 @@ Input : JSONL as emitted by scraper_formation / scraper_opal / scraper_reussir,
         {"tache", "source", "month_slug"}.
 Output: JSONL of canonical questions, each carrying the ids it absorbed.
 
-Output goes next to the input by default, tagged with the workflow that
-produced it so the two never overwrite each other:
+Tiers 0-1 (normalise, then hash) always run. On top of them, --mode picks how
+near-duplicates are found:
+
+    embed   sentence embeddings + cosine. Best at paraphrase, but needs a
+            ~2 GB model download.                                  (default)
+    tfidf   word/bigram TF-IDF + cosine. No download, seconds to run, and it
+            separates this corpus far more cleanly than the embeddings do -
+            IDF discounts the prompt template that pins every embedding pair
+            into [0.81, 1.00]. It only matches shared *vocabulary*, so a
+            reword into different words is the case it misses.
+    exact   tiers 0-1 only.
+
+Output goes next to the input by default, tagged with the mode that produced
+it so the three never overwrite each other:
 
     questions_reussir/tache2.jsonl
       --> questions_reussir/tache2_semantic.jsonl           + ..._semantic_review.jsonl
+      --> questions_reussir/tache2_tfidf.jsonl              + ..._tfidf_review.jsonl
       --> questions_reussir/tache2_no_semantic.jsonl        + ..._no_semantic_review.jsonl
 
 For a multi-file run the results span sources, so they land in the current
@@ -26,11 +39,19 @@ do concatenate them, but the intended workflow is one file at a time:
     # then all three sources together (ids are globally unique per tache)
     python3 deduplication.py questions_*/tache2.jsonl
 
-    # tiers 0-1 only, no model download
-    python3 deduplication.py questions_reussir/tache2.jsonl --no-semantic
+    # TF-IDF instead of embeddings - no model download, runs in seconds
+    python3 deduplication.py questions_*/tache2.jsonl --mode tfidf
 
-Install (only needed without --no-semantic):
-    pip install sentence-transformers numpy
+    # tiers 0-1 only
+    python3 deduplication.py questions_reussir/tache2.jsonl --mode exact
+
+The *_review.jsonl half of each run is a queue of pairs this script would not
+decide on its own. Open review.html (no server, no build) and load the file to
+work through them side by side; export writes back a *_decisions.jsonl.
+
+Install:
+    pip install numpy                    # --mode tfidf
+    pip install sentence-transformers    # --mode embed (pulls in torch)
 """
 
 from __future__ import annotations
@@ -38,10 +59,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import re
 import sys
 import unicodedata
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -65,6 +87,25 @@ REVIEW_LOW = 0.90   # [LOW, MERGE)    -> flagged as near-duplicate, NOT merged
 MAX_CLUSTER = 6     # belt-and-braces cap; complete linkage is the real guard
 EMBED_MODEL = "intfloat/multilingual-e5-large"
 
+# TF-IDF cosines live on a completely different scale and need their own pair,
+# so --mode tfidf swaps these in unless --auto-merge/--review-low are given.
+#
+# Measured on the 1599 exact-deduped Tache 2 questions from all three sources
+# (2-gram, 1,277,601 pairs): p50 = 0.034, p90 = 0.076, p99 = 0.168, max = 1.00.
+# Compare the embedding tier, where the shared prompt template pinned every
+# pair into [0.81, 1.00]: IDF discounts exactly those template words, so here
+# unrelated pairs really do sit near zero and the scale is usable end to end.
+#
+# Spot-checking the bands: >= 0.75 was reworded-but-identical every time;
+# 0.55-0.75 was mostly genuine rewordings; 0.35-0.45 started mixing in merely
+# same-theme questions ("anniversaire: invitation" vs "anniversaire: cadeau").
+# Hence 0.75 / 0.55, which on that corpus auto-merges 475 pairs and queues 328
+# for review. Dropping REVIEW_LOW to 0.45 catches a few more real duplicates
+# and roughly doubles the queue.
+TFIDF_AUTO_MERGE = 0.95
+TFIDF_REVIEW_LOW = 0.55
+TFIDF_NGRAM = 2     # unigrams alone barely separate; see tfidf_tokens()
+
 
 # --------------------------------------------------------------------------
 # Tier 0: normalisation
@@ -84,12 +125,18 @@ def normalize(text: str) -> str:
     return t.strip().strip("\"'").strip()
 
 
-def fingerprint(text: str) -> str:
-    """Aggressive key for exact-duplicate detection only (accents dropped)."""
+def _flatten(text: str) -> str:
+    """normalize() + lowercase + accents dropped. Shared base for the exact
+    fingerprint and the TF-IDF tokeniser, so the two tiers always agree on
+    what counts as "the same word"."""
     t = normalize(text).lower()
     t = unicodedata.normalize("NFD", t)
-    t = "".join(c for c in t if not unicodedata.combining(c))
-    t = re.sub(r"[^a-z0-9 ]", "", t)
+    return "".join(c for c in t if not unicodedata.combining(c))
+
+
+def fingerprint(text: str) -> str:
+    """Aggressive key for exact-duplicate detection only (accents dropped)."""
+    t = re.sub(r"[^a-z0-9 ]", "", _flatten(text))
     return hashlib.sha256(t.encode()).hexdigest()
 
 
@@ -219,6 +266,67 @@ def exact_pass(rows: list[Question]) -> list[list[Question]]:
     return list(buckets.values())
 
 
+_WORD = re.compile(r"[a-z0-9]+")
+
+
+def tfidf_tokens(text: str, ngram: int = 1) -> list[str]:
+    """Words, accent-free and lowercased, plus n-grams up to `ngram`.
+
+    Bigrams matter more here than in a typical corpus: every prompt is built
+    from the same handful of words ("vous", "me", "posez", "questions"), so
+    unigram overlap is nearly constant and the ordering carries much of the
+    remaining signal ("cours de musique" vs "musique de film").
+    """
+    words = _WORD.findall(_flatten(text))
+    out = list(words)
+    for n in range(2, ngram + 1):
+        out += [" ".join(words[i:i + n]) for i in range(len(words) - n + 1)]
+    return out
+
+
+def tfidf(texts: list[str], ngram: int = 2) -> "np.ndarray":
+    """L2-normalised TF-IDF rows, so `X @ X.T` is the cosine matrix - the same
+    contract embed() honours, which lets both modes share semantic_pass().
+
+    Deliberately hand-rolled on numpy rather than pulling in scikit-learn:
+    the whole point of this mode is to be the cheap one, and sklearn+scipy is
+    a ~100 MB dependency for thirty lines of arithmetic. Conventions follow
+    sklearn's defaults so the numbers are comparable to published work:
+    sublinear tf (1 + ln count) and smoothed idf (ln((1+N)/(1+df)) + 1).
+
+    Terms occurring in a single document are dropped *after* normalisation.
+    Such a term has exactly one non-zero entry, so it contributes nothing to
+    any off-diagonal dot product - pruning it late leaves every pairwise
+    cosine bit-for-bit unchanged while typically halving the matrix.
+    """
+    import numpy as np
+
+    counts = [Counter(tfidf_tokens(t, ngram)) for t in texts]
+    df: Counter[str] = Counter()
+    for c in counts:
+        df.update(c.keys())
+
+    n_docs = len(texts)
+    idf = {term: math.log((1 + n_docs) / (1 + d)) + 1.0 for term, d in df.items()}
+
+    # weight every term (so the L2 norms are the true ones), but only keep a
+    # column for terms that can actually be shared between two documents
+    kept = sorted(term for term, d in df.items() if d >= 2)
+    col = {term: i for i, term in enumerate(kept)}
+
+    X = np.zeros((n_docs, len(kept)), dtype=np.float32)
+    for row, c in enumerate(counts):
+        weights = {t: (1.0 + math.log(k)) * idf[t] for t, k in c.items()}
+        norm = math.sqrt(sum(w * w for w in weights.values())) or 1.0
+        for t, w in weights.items():
+            j = col.get(t)
+            if j is not None:
+                X[row, j] = w / norm
+    print(f"tf-idf: {len(kept)} shared terms kept of {len(df)} "
+          f"({ngram}-gram, {n_docs} documents)")
+    return X
+
+
 def embed(texts: list[str], model_name: str) -> "np.ndarray":
     import numpy as np
 
@@ -226,9 +334,10 @@ def embed(texts: list[str], model_name: str) -> "np.ndarray":
         from sentence_transformers import SentenceTransformer
     except ModuleNotFoundError:
         raise SystemExit(
-            "sentence-transformers is not installed, so the semantic tier "
+            "sentence-transformers is not installed, so --mode embed "
             "cannot run.\n"
-            "  - to skip it and keep exact dedup only:  add --no-semantic\n"
+            "  - for a near-duplicate tier with no download:  --mode tfidf\n"
+            "  - for exact duplicates only:                   --mode exact\n"
             "  - to enable it:  pip install sentence-transformers\n"
             f"    (then optionally a smaller model than the {model_name} "
             "default:\n"
@@ -247,6 +356,10 @@ def semantic_pass(reps: list[Question], vecs: "np.ndarray",
                   auto_merge: float, review_low: float, max_cluster: int,
                   linkage: str = "complete"):
     """Brute-force cosine. 2k x 2k is ~4M floats: nothing at this scale.
+
+    Shared by --mode embed and --mode tfidf: both hand it L2-normalised rows,
+    so `vecs @ vecs.T` is the cosine matrix either way. Only the thresholds
+    differ, because the two scales do (see TFIDF_AUTO_MERGE).
 
     Linkage matters a great deal on this corpus, which is why it defaults to
     "complete" rather than the usual single-linkage union-find:
@@ -290,6 +403,13 @@ def semantic_pass(reps: list[Question], vecs: "np.ndarray",
             continue                        # never merge across task types
         if score < auto_merge:
             review.append((i, j, score))
+            continue
+        if uf.find(i) == uf.find(j):
+            # A redundant edge inside a cluster that stronger edges already
+            # formed. Skipping it is not just an optimisation: the complete-
+            # linkage block below would compare the cluster against itself,
+            # and sim's zeroed diagonal would make `weakest` 0.0, filing an
+            # already-merged pair as needing review.
             continue
         if linkage == "complete":
             ci, cj = uf.members[uf.find(i)], uf.members[uf.find(j)]
@@ -376,14 +496,19 @@ def build_canonicals(buckets: list[list[Question]],
     return list(by_root.values())
 
 
-def default_out_paths(inputs: list[Path], no_semantic: bool) -> tuple[Path, Path]:
+# Output filename tag per mode. "exact" keeps the historical "no_semantic"
+# spelling so existing files and any scripts pointing at them still line up.
+MODE_TAGS = {"exact": "no_semantic", "tfidf": "tfidf", "embed": "semantic"}
+
+
+def default_out_paths(inputs: list[Path], mode: str) -> tuple[Path, Path]:
     """Where to write when -o/-r are not given: beside the input, tagged with
-    the workflow so a semantic and a no-semantic run never clobber each other.
+    the workflow so two different modes never clobber each other.
 
     A multi-file run mixes sources, so writing into any one source's folder
     would be misleading - those land in the current directory instead.
     """
-    tag = "no_semantic" if no_semantic else "semantic"
+    tag = MODE_TAGS[mode]
     if len(inputs) == 1:
         out_dir, stem = inputs[0].parent, inputs[0].stem
     else:
@@ -403,9 +528,20 @@ def main() -> None:
                     help="default: <input dir>/<stem>_{semantic|no_semantic}.jsonl")
     ap.add_argument("-r", "--review", type=Path,
                     help="default: the same, with _review before the extension")
-    ap.add_argument("-m", "--model", default=EMBED_MODEL)
+    ap.add_argument("-m", "--model", default=EMBED_MODEL,
+                    help="sentence-transformers model, --mode embed only")
+    ap.add_argument("--mode", choices=tuple(MODE_TAGS), default="embed",
+                    help="how to find near-duplicates on top of tiers 0-1: "
+                         "'embed' (default) = sentence embeddings, best at "
+                         "paraphrase but needs a ~2 GB model; "
+                         "'tfidf' = word/bigram TF-IDF cosine, no download, "
+                         "catches rewordings that reuse the same vocabulary; "
+                         "'exact' = tiers 0-1 only")
     ap.add_argument("--no-semantic", action="store_true",
-                    help="run tiers 0-1 only (no model download)")
+                    help="deprecated alias for --mode exact")
+    ap.add_argument("--tfidf-ngram", type=int, default=TFIDF_NGRAM,
+                    help=f"longest word n-gram for --mode tfidf "
+                         f"(default {TFIDF_NGRAM}; 1 = unigrams only)")
     ap.add_argument("--canonical", choices=tuple(CANONICAL_KEYS), default="latest",
                     help="which wording to keep for a group of duplicates: "
                          "'latest' = most recent month (default), "
@@ -414,12 +550,27 @@ def main() -> None:
                     help="'complete' (default) needs every pair in a cluster to "
                          "clear --auto-merge; 'single' is the old union-find "
                          "behaviour and chains unrelated questions together")
-    ap.add_argument("--auto-merge", type=float, default=AUTO_MERGE)
-    ap.add_argument("--review-low", type=float, default=REVIEW_LOW)
+    # left as None so the mode can pick its own scale; see TFIDF_AUTO_MERGE
+    ap.add_argument("--auto-merge", type=float, default=None,
+                    help=f"default {AUTO_MERGE} for --mode embed, "
+                         f"{TFIDF_AUTO_MERGE} for --mode tfidf")
+    ap.add_argument("--review-low", type=float, default=None,
+                    help=f"default {REVIEW_LOW} for --mode embed, "
+                         f"{TFIDF_REVIEW_LOW} for --mode tfidf")
     ap.add_argument("--max-cluster", type=int, default=MAX_CLUSTER)
     args = ap.parse_args()
 
-    default_out, default_review = default_out_paths(args.input, args.no_semantic)
+    if args.no_semantic:
+        args.mode = "exact"
+    if args.auto_merge is None:
+        args.auto_merge = TFIDF_AUTO_MERGE if args.mode == "tfidf" else AUTO_MERGE
+    if args.review_low is None:
+        args.review_low = TFIDF_REVIEW_LOW if args.mode == "tfidf" else REVIEW_LOW
+    if args.review_low > args.auto_merge:
+        sys.exit(f"--review-low ({args.review_low}) must not exceed "
+                 f"--auto-merge ({args.auto_merge})")
+
+    default_out, default_review = default_out_paths(args.input, args.mode)
     out_path = args.output or default_out
     review_path = args.review or default_review
     if out_path in set(args.input) or review_path in set(args.input):
@@ -437,16 +588,18 @@ def main() -> None:
     print(f"after exact dedup: {len(buckets)} "
           f"({len(rows) - len(buckets)} exact duplicates absorbed)")
 
-    if args.no_semantic:
+    if args.mode == "exact":
         clusters = {i: [i] for i in range(len(buckets))}
         review: list[tuple[int, int, float]] = []
     else:
-        vecs = embed([normalize(q.text) for q in reps], args.model)
+        texts = [normalize(q.text) for q in reps]
+        vecs = (tfidf(texts, args.tfidf_ngram) if args.mode == "tfidf"
+                else embed(texts, args.model))
         uf, review = semantic_pass(reps, vecs, args.auto_merge,
                                    args.review_low, args.max_cluster,
                                    args.linkage)
         clusters = uf.groups()
-        print(f"after semantic merge: {len(clusters)} "
+        print(f"after {args.mode} merge: {len(clusters)} "
               f"({len(buckets) - len(clusters)} near-identical groups merged)")
 
     out = build_canonicals(buckets, clusters, review, args.canonical)
@@ -474,11 +627,11 @@ def main() -> None:
     assert dupes + len(out) == len(rows), "duplicate accounting lost rows"
     assert all(set(c.exact_duplicate_ids) <= set(c.duplicate_ids) for c in out), \
         "exact_duplicate_ids must be a subset of duplicate_ids"
-    if args.no_semantic:
-        # with no semantic tier every cluster is a single exact bucket, so the
-        # two lists must coincide - a cheap check that neither drifts
+    if args.mode == "exact":
+        # with no similarity tier every cluster is a single exact bucket, so
+        # the two lists must coincide - a cheap check that neither drifts
         assert all(set(c.exact_duplicate_ids) == set(c.duplicate_ids) for c in out), \
-            "without the semantic tier all duplicates are exact duplicates"
+            "without a similarity tier all duplicates are exact duplicates"
     print(f"\ncanonical questions : {len(out)}")
     print(f"duplicates absorbed : {dupes} across {with_dupes} canonical(s)")
     print(f"flagged near-dupes  : {flagged} canonical(s), {len(review)} pair(s)"
