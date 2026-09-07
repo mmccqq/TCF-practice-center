@@ -22,3 +22,11 @@ openpyxl>=3.1
 # declares direct imports, and --mode embed additionally needs
 # `pip install sentence-transformers` (~2 GB, deliberately not pinned here).
 numpy>=1.26
+
+# abstract.py, one per provider - both imports are lazy, so you only need the
+# SDK for the provider you actually pass to -p.
+#   -p anthropic  ANTHROPIC_API_KEY, or a profile from `ant auth login`
+#   -p openai     OPENAI_API_KEY
+#   -p deepseek   DEEPSEEK_API_KEY   (same SDK, different base_url)
+anthropic>=1.4
+openai>=2.0
