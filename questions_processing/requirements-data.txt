@@ -28,5 +28,7 @@ numpy>=1.26
 #   -p anthropic  ANTHROPIC_API_KEY, or a profile from `ant auth login`
 #   -p openai     OPENAI_API_KEY
 #   -p deepseek   DEEPSEEK_API_KEY   (same SDK, different base_url)
+#   -p gemini     GEMINI_API_KEY     (same SDK, Google's OpenAI-compatible
+#                                     endpoint; free key from aistudio.google.com)
 anthropic>=1.4
 openai>=2.0

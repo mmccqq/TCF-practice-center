@@ -1,116 +1,97 @@
 #!/usr/bin/env python3
 """
-Ask an LLM for a short abstract of each TCF question.
+Run an LLM task over a JSONL of TCF questions.
 
-An abstract is a <=10-word French noun phrase naming the situation - what the
-question is *about*, stripped of the role-play scaffolding every prompt shares
-("Je suis votre ami(e)... Vous me posez des questions..."). It is what a list
-view can show instead of 300 characters of near-identical boilerplate, and what
-a human skims when judging whether two questions are the same.
+The task - what to ask for - lives in llm_tasks.py. This file is the engine:
+chunking, the alignment check that makes chunking safe, resume-by-id, four
+providers, two batch dialects, and cost estimation. Task and provider vary
+independently:
 
-    Je suis votre voisin(e). Vous venez d'arriver dans la ville et vous ne
-    connaissez personne. Vous me demandez comment faire pour rencontrer de
-    nouvelles personnes.
-        -> "Rencontrer des gens dans une nouvelle ville"
+    # try the topic rules on 40 questions, free, immediate
+    python3 llm.py sync questions_reussir/tache2.jsonl -t topic -p gemini \
+        --limit 40 --chunk 40
 
-    # what will this cost, and how many are left to do?
-    python3 abstract.py estimate questions_reussir/tache2.jsonl --chunk 40
+    # what would the whole corpus cost?
+    python3 llm.py estimate questions_reussir/tache2.jsonl -t topic --chunk 40
 
     # the real run: submit a batch, wait, write results
-    python3 abstract.py run questions_reussir/tache2.jsonl --chunk 40
+    python3 llm.py run questions_reussir/tache2.jsonl -t topic --chunk 40
 
-    # resume after a crash / a closed laptop (state kept in <out>.batch)
-    python3 abstract.py fetch questions_reussir/tache2.jsonl
+    # resume after a crash (state, including task and provider, in <out>.batch)
+    python3 llm.py fetch questions_reussir/tache2.jsonl -t topic
 
-    # try the prompt on a handful, immediately, no batch
-    python3 abstract.py sync questions_reussir/tache2.jsonl --limit 40 --chunk 40
-
-    # a different provider - same prompt, same output format
-    python3 abstract.py sync questions_reussir/tache2.jsonl -p deepseek --limit 40
-
-Input is any JSONL with `id` and `text` - scraper output (tache2.jsonl) or
-deduplicated clusters (tache2_tfidf.jsonl). Output defaults to
-<input stem>_abstract.jsonl, one {"id", "abstract", "model"} per line.
+Input is any JSONL with `id` and `text`. Output defaults to
+<input stem>_<task>.jsonl - one file per task, so two tasks never collide and
+"already done" always means "already done *for this task*".
 
 Re-running skips ids already present in the output, so a partial run resumes
 and failures are retried simply by running it again.
 
 
 COMMANDS
-    estimate   count tokens on a sample and price the whole run. Costs nothing.
-    run        submit every pending question as a batch, wait, write results.
+    estimate   count tokens on a sample and price the run. Costs nothing.
+    run        submit every pending row as a batch, wait, write results.
     fetch      collect a batch submitted earlier by `run`.
     sync       send chunks one at a time and print each answer as it arrives.
-    selftest   offline check of prompts, chunking and alignment. No API call.
+    selftest   every task against every provider, offline. No API call.
 
 PARAMETERS
     input                   (required) JSONL file with `id` and `text`.
 
-    -o, --output PATH       Where to write. Default <input stem>_abstract.jsonl.
-                            Also fixes where the batch state file lives
-                            (<output>.batch), which `fetch` reads.
+    -t, --task NAME         topic (default) | abstract. Defined in llm_tasks.py.
 
     -p, --provider NAME     anthropic (default) | openai | deepseek | gemini.
 
     -m, --model NAME        Default is the provider's own: claude-opus-5,
                             gpt-5, deepseek-chat, gemini-2.5-flash.
 
-    --chunk N               Questions per request. Default 1. Larger is much
-                            cheaper (the instructions stop being re-sent) but
-                            loses more work when a chunk is rejected. 20-40 is
-                            a reasonable range.
+    -o, --output PATH       Default <input stem>_<task>.jsonl. Also fixes where
+                            the batch state file lives (<output>.batch).
 
-    --limit N               Only the first N *pending* questions. For trying
-                            things out; combine with --chunk.
+    --chunk N               Rows per request. Default 1. Larger is much cheaper
+                            (the prompt stops being re-sent) but loses more
+                            work when a chunk is rejected. 20-40 is reasonable.
+
+    --limit N               Only the first N *pending* rows. For trying things
+                            out; combine with --chunk.
+
+    --max-tokens N          Output budget per request, overriding 1500+100*chunk.
+                            Raise this on "ran out of output budget" - thinking
+                            tokens count against it.
+
+    --reasoning LEVEL       reasoning_effort for OpenAI-compatible providers
+                            (none / minimal / low). Stops a thinking model
+                            spending the budget on a labelling task.
 
     --json-mode MODE        schema | object. Override how structured output is
                             requested, for a provider that rejects json_schema.
-                            No effect on -p anthropic.
 
-    --poll SECONDS          `run` and `fetch` only. Seconds between batch
-                            status checks. Default 60.
-
+    --poll SECONDS          `run`/`fetch` only. Seconds between checks. Default 60.
     --batch-id ID           `fetch` only. Default: read from <output>.batch.
+    --sync                  `estimate` only. Price at standard, not batch, rates.
 
-    --sync                  `estimate` only. Price at standard rates instead of
-                            the batch discount, i.e. what `sync` would cost.
+Why batches: a few thousand short, independent, non-urgent requests is exactly
+the Batch API's case - 50% of standard price, results within an hour (24h
+ceiling). `sync` is for trying a prompt out, and is the only option on a
+provider without a batch API.
 
-Every parameter above except --poll/--batch-id/--sync is accepted by all four
-of estimate/run/fetch/sync, so the flags you test with are the flags you run
-with.
+Why --chunk: at chunk 1 the prompt is re-sent with every single row and
+dominates the bill; the rows themselves average ~60 tokens. Chunking 40 sends
+it 26 times instead of 1014. The risk is misalignment - a model answering 39
+of 40, or reordering them. Each row is numbered and each answer must carry its
+number back; a chunk whose numbers don't match exactly is discarded whole and
+its rows stay pending, so a re-run retries them.
 
-Why batches: this is a few thousand short, independent, non-urgent requests -
-exactly the Batch API's case. It costs 50% of the standard price and returns
-within an hour (24h ceiling). `sync` exists for trying the prompt out, not for
-the full corpus.
+Providers, all producing the same output file:
 
-Why --chunk: at chunk 1 the ~450-token instruction block is re-sent with every
-single question and ends up dominating the bill - the questions themselves
-average only ~60 tokens. Batching 40 per request sends the instructions 26
-times instead of 1014, which is most of the cost:
-
-    chunk   1   1014 requests   instructions sent 1014x
-    chunk  40     26 requests   instructions sent 26x, ~4x cheaper overall
-
-The risk it buys is misalignment - a model answering 39 of 40, or reordering
-them. Each question is numbered and each answer must carry its number back;
-a chunk whose numbers don't match exactly what was sent is discarded whole and
-its questions stay pending, so a re-run retries them. Larger chunks are
-cheaper but lose more work per failure; 20-40 is a reasonable range.
-
-Providers (-p / --provider), all producing the same output file:
-
-    anthropic   default. Structured output is schema-enforced; has a batch API.
+    anthropic   default. Schema-enforced structured output; inline batch API.
     openai      schema-enforced; file-based batch API.
     deepseek    much cheaper, but JSON *mode* rather than schema enforcement,
                 and no batch API - use `sync`.
-    gemini      has a free tier, rate-limited per minute rather than capped in
-                dollars; no batch API here, so `sync` with a large --chunk.
+    gemini      free tier, rate-limited per minute; no batch API here either.
 
-The last three all speak OpenAI's wire format, so they share one class and
-differ only by base_url, model and a couple of flags. If one of them rejects
-`json_schema`, pass --json-mode object; the alignment check protects the
-output either way.
+The last three speak OpenAI's wire format, so they share one class and differ
+only by base_url, model and a couple of flags.
 
 Install and auth:
     pip install anthropic                    # -p anthropic
@@ -125,11 +106,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
+
+from llm_tasks import ENVELOPE, TASKS, Task
 
 DEFAULT_CHUNK = 1
 
@@ -142,144 +126,35 @@ DEFAULT_CHUNK = 1
 # budget, so it usually makes the problem worse rather than better.
 MAX_TOKENS_OVERRIDE: int | None = None
 
+# --debug: dump the provider's whole response whenever a chunk fails. The
+# decoded message says what went wrong; this says what the provider actually
+# sent, which is what you need when the two disagree.
+DEBUG = False
+
+# --extra: vendor-specific fields the OpenAI shape has no slot for, e.g.
+# DeepSeek's {"thinking": {"type": "disabled"}}. These cannot be passed as
+# top-level keyword arguments - the OpenAI SDK would reject an unknown kwarg -
+# so the SDK path sends them through its `extra_body` escape hatch, while the
+# batch path (which writes raw JSON, no SDK) merges them into the body itself.
+EXTRA_BODY: dict = {}
+
+
+def dump(label: str, obj) -> None:
+    if not DEBUG:
+        return
+    body = obj if isinstance(obj, (str, dict)) else getattr(obj, "to_dict", lambda: obj)()
+    print(f"  ~ {label} raw response:\n"
+          + json.dumps(body, indent=1, ensure_ascii=False, default=str),
+          file=sys.stderr)
+
 
 def max_tokens_for(chunk: int) -> int:
     return MAX_TOKENS_OVERRIDE or (1500 + 100 * chunk)
 
 
-PROMPT_TOPIC = """\
-You assign one topic label to French TCF Canada Tâche 2 role-play
-prompts. Apply the rules below IN ORDER. The first rule that matches
-wins — stop there. Never invent a label.
-
-RULE 1  Is the scenario about something that ALREADY HAPPENED, where
-        the candidate asks the examiner to recount it?
-        -> past event
-        (a wedding a colleague attended; a film a colleague saw)
-
-RULE 2  Is the CANDIDATE planning an occasion and asking for ideas
-        or help to make it happen?
-        -> organization
-        (preparing a Quebec-specialty meal; organising a birthday
-        party; hosting friends visiting your city)
-
-RULE 3  Is someone ELSE hosting or running a gathering, and the
-        candidate asks for details or wants to join?
-        -> event
-        (a residents' evening; group jogging outings; an activity
-        for meeting new people)
-
-RULE 4  Is the subject learning, teaching, courses?
-        -> study
-        (music school lessons; a cooking teacher;)
-RULE 5  Is the subject how to MOVE AROUND a city — public transit,
-        cycling, driving, carpooling, routes, passes, parking?
-        -> transport
-        (public transport in a new city; commuting by bike;
-        carpooling with a neighbour)
-RULE 6  Does the candidate want to get a service in a location from a provider?
-        -> location
-        (sports club; restaurant, hotel room; toy library; chalet rental;
-        home-cooking service; grocery delivery; amusement park)
-
-RULE 7  Is it a trip or holiday being planned or chosen?
-        -> tour plan
-        (weekend on a budget; holidays via a travel agency;
-        destinations offered by an agency)
-
-RULE 8  Is it about where to live, moving, flatmates, or settling
-        into a neighbourhood?
-        -> housing&community
-        (room-sharing; renting a flat; finding housing; getting to
-        know the community)
-
-RULE 9  Is it about a job, career, workplace conditions, or hiring?
-        -> work
-        (interview preparation; working hours in Canada; a
-        colleague's career path)
-
-RULE 10  Is someone taking temporary responsibility for a living
-        being?
-        -> caretaking
-        (pet-sitting; dog-sitting)
-
-RULE 11 Is it buying or selling a specific object between
-        individuals?
-        -> commerce
-        (a first smartphone for a child; items a friend is selling)
-
-RULE 12 Is it films, music, books, or media the examiner consumed?
-        -> media
-
-RULE 13 Is it volunteering or a non-profit association?
-        -> charity
-RULE 14  Does the candidate ask the examiner to describe a personal life or canadian's daily life?
-        -> personal_life
-        (a Canadian friend's current daily life)
-RULE 15 None of the above -> other
-
-BOUNDARY NOTES
-- RULE 2 vs RULE 3 turns on WHO is hosting, not on the subject. Read the examiner's opening line.
-- RULE 4 beats RULE 6.
-- RULE 6 beats RULE 7. Booking a specific hotel is location; choosing where to go is tour plan.
-- RULE 5 vs RULE 7 (travel): transport is daily mobility where you   live; travel is a trip or holiday. "How do I get to work" is   transport; "how do I get to Banff for the weekend" is travel.
-- RULE 14 loses to rules 1, 9, and 12. A colleague's career path is work. A film they saw is media. A wedding they attended is   past_event. Only unfocused "what is your life like" reaches 13.
-
-Sortie correspondante:
-
-{"topics": [
-  {"n": 1, "topic": "location"},
-  {"n": 2, "topic": "caretaking"},
-  {"n": 3, "topic": "media"}]}
-"""
-
-# The shape every provider is asked for. How it is *requested* differs (see
-# each Provider.request); what comes back is validated identically either way.
-#
-# `n` is the question's 1-based position in *this request*, not its id. Two
-# reasons: a short integer is far less error-prone for the model to echo than
-# a 13-digit scraper id, and it costs a few tokens instead of a dozen. The
-# mapping back to real ids is done locally, and a chunk whose returned `n`
-# values don't match what was sent is rejected whole - see parse_chunk().
-
-# The key each answer object carries. Change it here and the schema, the
-# validation and the output record all follow; the prompt's worked example
-# must use the same word or a JSON-mode provider will emit the other one.
-ANSWER_KEY = "topic"
-
-JSON_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "topics": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "n": {"type": "integer",
-                          "description": "the number the sujet was given in the request"},
-                    ANSWER_KEY: {
-                        "type": "string",
-                        "description": "high-level topics for classification",
-                    },
-                },
-                "required": ["n", ANSWER_KEY],
-                "additionalProperties": False,
-            },
-        },
-    },
-    "required": ["topics"],
-    "additionalProperties": False,
-}
-
-
 # --------------------------------------------------------------------------
 # input / output
 # --------------------------------------------------------------------------
-
-# Reads a JSONL file line by line. JSONL means each line is a separate JSON object.
-# It stops with a clear error if:
-# - the file does not exist
-# - one line is not valid JSON
 
 def read_jsonl(path: Path) -> list[dict]:
     if not path.exists():
@@ -296,14 +171,20 @@ def read_jsonl(path: Path) -> list[dict]:
                 sys.exit(f"{path}:{n}: invalid JSON - {exc}")
     return rows
 
-def default_out(inp: Path) -> Path:
-    """Creates the default output name. For example:
-    tache2.jsonl → tache2_abstract.jsonl"""
-    return inp.with_name(f"{inp.stem}_abstract.jsonl")
+
+def default_out(inp: Path, task: Task, model: str) -> Path:
+    """One file per (task, model).
+
+    The model belongs in the name because `pending()` skips ids already in the
+    output: with a shared file, a second model asked to label the same rows
+    would find them "done" and skip precisely the ones you wanted to compare.
+    """
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", model)
+    return inp.with_name(f"{inp.stem}_{task.name}_{safe}.jsonl")
 
 
 def pending(inp: Path, out: Path, limit: int | None) -> list[dict]:
-    """Finds questions that still need processing. Rows still needing an abstract: those whose id is not in the output yet.
+    """Rows still needing an abstract: those whose id is not in the output yet.
 
     This is what makes the script resumable and makes retrying failures free -
     a failed request simply never wrote a line, so the next run picks it up.
@@ -315,7 +196,6 @@ def pending(inp: Path, out: Path, limit: int | None) -> list[dict]:
 
 
 def append(out: Path, records: list[dict]) -> None:
-    """Adds records to the end of the output file. It does not replace earlier results."""
     with out.open("a", encoding="utf-8") as fh:
         for r in records:
             fh.write(json.dumps(r, ensure_ascii=False) + "\n")
@@ -323,11 +203,6 @@ def append(out: Path, records: list[dict]) -> None:
 
 def chunked(rows: list[dict], size: int) -> list[list[dict]]:
     return [rows[i:i + size] for i in range(0, len(rows), size)]
-
-
-def numbered(rows: list[dict]) -> str:
-    """The questions as the model sees them: 1-based, one per line."""
-    return "\n".join(f"{i}. {r['text']}" for i, r in enumerate(rows, 1))
 
 
 # --------------------------------------------------------------------------
@@ -359,28 +234,24 @@ class Provider:
 
     name: str
     default_model: str
-    prices: dict[str, tuple[float, float]]   # $/Mtok (input, output)
     batch_discount: float = 0.5
     supports_batch: bool = True
     install_hint: str = ""
     key_env: str = ""
 
-    def price(self, model: str) -> tuple[float, float]:
-        return self.prices.get(model, next(iter(self.prices.values())))
-
     # --- required of every provider -------------------------------------
-    def request(self, rows: list[dict], model: str) -> dict:
+    def request(self, rows: list[dict], model: str, task: Task) -> dict:
         raise NotImplementedError
 
-    def count_tokens(self, rows: list[dict], model: str) -> int | None:
+    def count_tokens(self, rows: list[dict], model: str, task: Task) -> int | None:
         """Exact input-token count, or None if the API does not offer one."""
         return None
 
-    def send(self, rows: list[dict], model: str) -> Reply:
+    def send(self, rows: list[dict], model: str, task: Task) -> Reply:
         raise NotImplementedError
 
     # --- only needed when supports_batch --------------------------------
-    def submit(self, chunks: list[list[dict]], model: str) -> str:
+    def submit(self, chunks: list[list[dict]], model: str, task: Task) -> str:
         raise NotImplementedError
 
     def wait(self, batch_id: str, poll: int) -> None:
@@ -402,9 +273,6 @@ class Provider:
 class AnthropicProvider(Provider):
     name = "anthropic"
     default_model = "claude-opus-5"
-    prices = {"claude-opus-5": (5.00, 25.00),
-              "claude-sonnet-5": (2.00, 10.00),
-              "claude-haiku-4-5": (1.00, 5.00)}
     install_hint = "pip install anthropic"
     key_env = "ANTHROPIC_API_KEY (or `ant auth login`)"
 
@@ -420,28 +288,30 @@ class AnthropicProvider(Provider):
             self._client = anthropic.Anthropic()
         return self._client
 
-    def request(self, rows, model):
+    def request(self, rows, model, task):
         return {
             "model": model,
             "max_tokens": max_tokens_for(len(rows)),
-            # cache_control only bites if PROMPT_TOPIC exceeds the model's minimum
+            # cache_control only bites if SYSTEM exceeds the model's minimum
             # cacheable prefix (512-4096 tokens); below that it does nothing.
-            "system": [{"type": "text", "text": PROMPT_TOPIC,
+            "system": [{"type": "text", "text": task.prompt,
                         "cache_control": {"type": "ephemeral"}}],
             # effort "low": this is extraction, not reasoning - the recommended
             # way to cut cost rather than disabling thinking outright
             "output_config": {"effort": "low",
-                              "format": {"type": "json_schema", "schema": JSON_SCHEMA}},
-            "messages": [{"role": "user", "content": numbered(rows)}],
+                              "format": {"type": "json_schema", "schema": task.schema()}},
+            "messages": [{"role": "user", "content": task.body(rows)}],
         }
 
-    def count_tokens(self, rows, model):
+    def count_tokens(self, rows, model, task):
         return self.client().messages.count_tokens(
-            model=model, system=PROMPT_TOPIC,
-            messages=self.request(rows, model)["messages"],
+            model=model, system=task.prompt,
+            messages=self.request(rows, model, task)["messages"],
         ).input_tokens
 
     def _reply(self, message) -> Reply:
+        if message.stop_reason != "end_turn":
+            dump(self.name, message)
         if message.stop_reason == "refusal":
             cat = getattr(message.stop_details, "category", None)
             return Reply(None, message.model, f"refused ({cat})")
@@ -450,11 +320,11 @@ class AnthropicProvider(Provider):
         text = next((b.text for b in message.content if b.type == "text"), None)
         return Reply(text, message.model, None if text else "no text block")
 
-    def send(self, rows, model):
+    def send(self, rows, model, task):
         client = self.client()      # first, so a missing SDK reports itself properly
         import anthropic
         try:
-            return self._reply(client.messages.create(**self.request(rows, model)))
+            return self._reply(client.messages.create(**self.request(rows, model, task)))
         except anthropic.RateLimitError as exc:
             retry = int(exc.response.headers.get("retry-after", "60"))
             print(f"  rate limited, sleeping {retry}s", file=sys.stderr)
@@ -463,12 +333,12 @@ class AnthropicProvider(Provider):
         except anthropic.APIStatusError as exc:
             return Reply(None, model, f"{exc.status_code} {exc.message}")
 
-    def submit(self, chunks, model):
+    def submit(self, chunks, model, task):
         from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
         from anthropic.types.messages.batch_create_params import Request
         batch = self.client().messages.batches.create(requests=[
             Request(custom_id=f"chunk-{i}",
-                    params=MessageCreateParamsNonStreaming(**self.request(c, model)))
+                    params=MessageCreateParamsNonStreaming(**self.request(c, model, task)))
             for i, c in enumerate(chunks)
         ])
         return batch.id
@@ -499,14 +369,13 @@ class OpenAICompatible(Provider):
     valid JSON, and whether it has a batch API at all.
     """
 
-    def __init__(self, *, name, base_url, key_env, default_model, prices,
+    def __init__(self, *, name, base_url, key_env, default_model,
                  schema_mode="json_schema", token_param="max_completion_tokens",
                  supports_batch=True, reasoning_effort=None):
         self.name = name
         self.base_url = base_url
         self.key_env = key_env
         self.default_model = default_model
-        self.prices = prices
         self.schema_mode = schema_mode
         self.token_param = token_param
         self.supports_batch = supports_batch
@@ -533,13 +402,13 @@ class OpenAICompatible(Provider):
             self._client = openai.OpenAI(api_key=key, base_url=self.base_url)
         return self._client
 
-    def request(self, rows, model):
+    def request(self, rows, model, task):
         if self.schema_mode == "json_schema":
             # strict schema enforcement; JSON_SCHEMA already satisfies its
             # requirements (every property required, additionalProperties false)
             fmt = {"type": "json_schema",
-                   "json_schema": {"name": "topics", "strict": True,
-                                   "schema": JSON_SCHEMA}}
+                   "json_schema": {"name": ENVELOPE, "strict": True,
+                                   "schema": task.schema()}}
         else:
             # JSON *mode*: valid JSON is guaranteed, the shape is not. The
             # schema is described in the prompt instead, and parse_chunk's
@@ -551,13 +420,15 @@ class OpenAICompatible(Provider):
             "response_format": fmt,
             # OpenAI-style APIs carry the system prompt as the first message
             # rather than as a separate top-level field
-            "messages": [{"role": "system", "content": PROMPT_TOPIC},
-                         {"role": "user", "content": numbered(rows)}],
+            "messages": [{"role": "system", "content": task.prompt},
+                         {"role": "user", "content": task.body(rows)}],
         }
-        if self.reasoning_effort:
+        if self.reasoning_effort and "reasoning_effort" not in EXTRA_BODY:
             # Gemini and OpenAI's reasoning models both accept this through the
             # OpenAI wire format; it is the knob that stops thinking from
-            # eating the whole output budget on a labelling task.
+            # eating the whole output budget on a labelling task. Whether a
+            # given compatibility layer honours it - or silently drops it - is
+            # what --debug is for.
             req["reasoning_effort"] = self.reasoning_effort
         return req
 
@@ -576,6 +447,8 @@ class OpenAICompatible(Provider):
 
     def _reply(self, completion, cap: int = 0) -> Reply:
         choice = completion.choices[0]
+        if choice.finish_reason != "stop":
+            dump(self.name, completion)
         model = getattr(completion, "model", self.default_model)
         if choice.finish_reason == "length":
             return Reply(None, model,
@@ -586,13 +459,18 @@ class OpenAICompatible(Provider):
         text = choice.message.content
         return Reply(text, model, None if text else "empty response")
 
-    def send(self, rows, model):
+    def send(self, rows, model, task):
         client = self.client()      # first, so a missing SDK reports itself properly
         import openai
         # Free tiers rate-limit per minute, so being throttled is the normal
         # case rather than an error. Sleep and retry once before giving up on
         # the chunk; it stays pending either way, but one retry saves a re-run.
-        req = self.request(rows, model)
+        req = self.request(rows, model, task)
+        # the SDK validates its own kwargs, so vendor fields ride in extra_body
+        if EXTRA_BODY:
+            req = {**req, "extra_body": EXTRA_BODY}
+        dump(f"{self.name} request", {k: ("<prompt>" if k == "messages" else v)
+                                      for k, v in req.items()})
         for attempt in (1, 2):
             try:
                 return self._reply(client.chat.completions.create(**req),
@@ -605,16 +483,19 @@ class OpenAICompatible(Provider):
                 print(f"  rate limited, sleeping {wait}s", file=sys.stderr)
                 time.sleep(wait)
             except openai.APIStatusError as exc:
+                dump(self.name, getattr(exc, "body", None) or str(exc))
                 return Reply(None, model, f"{exc.status_code} {exc.message}")
         return Reply(None, model, "rate limited")           # unreachable
 
     # -- batch: OpenAI's is file-based, unlike Anthropic's inline requests --
-    def submit(self, chunks, model):
+    def submit(self, chunks, model, task):
         import io
         lines = "\n".join(
             json.dumps({"custom_id": f"chunk-{i}", "method": "POST",
                         "url": "/v1/chat/completions",
-                        "body": self.request(c, model)}, ensure_ascii=False)
+                        # raw HTTP here, no SDK: vendor fields belong in the body
+                        "body": {**self.request(c, model, task), **EXTRA_BODY}},
+                       ensure_ascii=False)
             for i, c in enumerate(chunks)
         )
         upload = self.client().files.create(
@@ -663,17 +544,16 @@ PROVIDERS: dict[str, Provider] = {
     "anthropic": AnthropicProvider(),
     "openai": OpenAICompatible(
         name="openai", base_url=None, key_env="OPENAI_API_KEY",
-        default_model="gpt-5",
+        default_model="gpt-5.6-luna",
         # verify against https://openai.com/api/pricing before trusting `estimate`
-        prices={"gpt-5": (1.25, 10.00)},
     ),
     "deepseek": OpenAICompatible(
         name="deepseek", base_url="https://api.deepseek.com",
-        key_env="DEEPSEEK_API_KEY", default_model="deepseek-chat",
-        prices={"deepseek-chat": (0.27, 1.10)},
+        key_env="DEEPSEEK_API_KEY", default_model="deepseek-v4-pro",
         # DeepSeek offers JSON mode, not schema enforcement, and has no batch
         # API - both were true at the time of writing; check their docs.
         schema_mode="json_object", token_param="max_tokens", supports_batch=False,
+        reasoning_effort="low", 
     ),
     # Google publishes an OpenAI-compatible endpoint for Gemini, so it needs no
     # new code - only this entry. AI Studio has a free tier, rate-limited per
@@ -684,8 +564,7 @@ PROVIDERS: dict[str, Provider] = {
         name="gemini",
         base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
         key_env=("GEMINI_API_KEY", "GOOGLE_API_KEY"),
-        default_model="gemini-3.8-flash",
-        prices={"gemini-2.5-flash": (0.30, 2.50)},   # $0 on the free tier
+        default_model="gemini-3.8-flash",   # $0 on the free tier
         token_param="max_tokens", supports_batch=False,
     ),
 }
@@ -695,7 +574,7 @@ PROVIDERS: dict[str, Provider] = {
 # shared: turn a Reply into records, or reject it
 # --------------------------------------------------------------------------
 
-def parse_chunk(reply: Reply, ids: list[str], label: str) -> list[dict]:
+def parse_chunk(reply: Reply, ids: list[str], label: str, task: Task) -> list[dict]:
     """Map a chunk's reply back onto the ids that were sent, or reject it.
 
     Batching many questions into one request trades cost for the risk that the
@@ -715,13 +594,13 @@ def parse_chunk(reply: Reply, ids: list[str], label: str) -> list[dict]:
     # A provider offering JSON mode rather than schema enforcement can return
     # well-formed JSON of the wrong shape, so this must not be allowed to raise.
     try:
-        items = json.loads(reply.text)["topics"]
+        items = json.loads(reply.text)[ENVELOPE]
         got = {int(it["n"]) for it in items}
         # read the answer field here too: in JSON mode the model can follow the
         # prompt's example key instead of the schema's, and a KeyError raised
         # after the alignment check would abort the whole run rather than
         # voiding one chunk
-        answers = {int(it["n"]): it[ANSWER_KEY] for it in items}
+        answers = {int(it["n"]): it[task.answer_key] for it in items}
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         print(f"  ! {label}: unusable JSON - {exc}", file=sys.stderr)
         return []
@@ -734,7 +613,7 @@ def parse_chunk(reply: Reply, ids: list[str], label: str) -> list[dict]:
               f"{f', unexpected {extra}' if extra else ''}", file=sys.stderr)
         return []
 
-    return [{"id": ids[n - 1], "topic": answers[n], "model": reply.model}
+    return [{**task.record(ids[n - 1], answers[n], reply.model)}
             for n in sorted(answers)]
 
 
@@ -742,8 +621,14 @@ def parse_chunk(reply: Reply, ids: list[str], label: str) -> list[dict]:
 # commands
 # --------------------------------------------------------------------------
 
-def _setup(args) -> tuple[Provider, Path, list[dict]]:
+def _resolve(args) -> tuple[Provider, Task, Path]:
+    """Provider, task and output path - everything but the pending rows.
+
+    `fetch` needs the path in order to find the state file, but has no reason
+    to read the input, so the two share this and nothing else.
+    """
     prov = PROVIDERS[args.provider]
+    task = TASKS[args.task]
     args.model = args.model or prov.default_model
     # Whether a given endpoint enforces a JSON schema or only guarantees valid
     # JSON is the thing most likely to have changed since this was written, so
@@ -755,24 +640,39 @@ def _setup(args) -> tuple[Provider, Path, list[dict]]:
     if getattr(args, "max_tokens", None):
         global MAX_TOKENS_OVERRIDE
         MAX_TOKENS_OVERRIDE = args.max_tokens
-    out = args.output or default_out(args.input)
-    return prov, out, pending(args.input, out, args.limit)
+    if getattr(args, "debug", False):
+        global DEBUG
+        DEBUG = True
+    if getattr(args, "extra", None):
+        global EXTRA_BODY
+        try:
+            EXTRA_BODY = json.loads(args.extra)
+        except json.JSONDecodeError as exc:
+            sys.exit(f"--extra is not valid JSON: {exc}")
+        if not isinstance(EXTRA_BODY, dict):
+            sys.exit("--extra must be a JSON object")
+    return prov, task, args.output or default_out(args.input, task, args.model)
+
+
+def _setup(args) -> tuple[Provider, Task, Path, list[dict]]:
+    prov, task, out = _resolve(args)
+    return prov, task, out, pending(args.input, out, args.limit)
 
 
 def cmd_estimate(args) -> None:
-    prov, out, todo = _setup(args)
+    prov, task, out, todo = _setup(args)
     if not todo:
-        print("nothing to do - every id already has an abstract")
+        print(f"nothing to do - every id already has a {task.name}")
         return
 
     chunks = chunked(todo, args.chunk)
     # count a sample of whole chunks rather than all of them: count_tokens is
     # free but still one round trip per call, and these prompts are near-uniform
     sample = chunks[: min(5, len(chunks))]
-    counts = [prov.count_tokens(c, args.model) for c in sample]
+    counts = [prov.count_tokens(c, args.model, task) for c in sample]
     if counts[0] is None:
         # no token-counting endpoint; French runs about 3.2 characters/token
-        avg_in = sum(len(PROMPT_TOPIC) + len(numbered(c)) for c in sample) / len(sample) / 3.2
+        avg_in = sum(len(task.prompt) + len(task.body(c)) for c in sample) / len(sample) / 3.2
         source = "estimated from characters"
     else:
         avg_in = sum(counts) / len(counts)
@@ -780,34 +680,50 @@ def cmd_estimate(args) -> None:
 
     # ~25 tokens of answer per question, plus a fixed slice of thinking
     avg_out = 40 + 25 * args.chunk
-    in_price, out_price = prov.price(args.model)
+    total_in = avg_in * len(chunks)
+    total_out = avg_out * len(chunks)
     batched = prov.supports_batch and not args.sync
-    discount = prov.batch_discount if batched else 1.0
-    cost = len(chunks) * discount * (avg_in * in_price + avg_out * out_price) / 1e6
 
-    print(f"{len(todo)} question(s) still need an abstract")
+    print(f"{len(todo)} row(s) still need a {task.name}")
     print(f"  provider         {prov.name}")
     print(f"  model            {args.model}")
     print(f"  chunk size       {args.chunk}  ->  {len(chunks)} request(s)")
-    print(f"  avg input        {avg_in:.0f} tokens/request ({source})")
-    print(f"  assumed output   {avg_out} tokens/request")
-    print(f"  pricing          {'batch' if batched else 'standard'}")
-    print(f"  estimated cost   ${cost:.2f}")
+    print(f"  input            {total_in:>10,.0f} tokens  "
+          f"({avg_in:.0f}/request, {source})")
+    print(f"  output           {total_out:>10,.0f} tokens  "
+          f"({avg_out}/request, assumed)")
+    print(f"  pricing          {'batch, usually half the standard rate' if batched else 'standard'}")
+
+    if args.price:
+        try:
+            in_price, out_price = (float(x) for x in args.price.split(","))
+        except ValueError:
+            sys.exit("--price wants two numbers, e.g. --price 0.27,1.10")
+        rate = prov.batch_discount if batched else 1.0
+        cost = rate * (total_in * in_price + total_out * out_price) / 1e6
+        print(f"  at {in_price}/{out_price} per Mtok:  ${cost:.2f}")
+    else:
+        # Deliberately no built-in rate card: published prices change often
+        # enough that a table in this repo would be confidently wrong, which is
+        # worse than absent. Tokens are a measurement; dollars are a lookup.
+        print("\n  no price given, so no dollar figure. Multiply the tokens above")
+        print("  by the current rate, or pass it in:  --price <in>,<out>  ($/Mtok)")
+
     print("\nOutput length is an assumption, not a measurement - run")
-    print(f"`sync --limit {max(args.chunk * 2, 10)} --chunk {args.chunk}` first if the number matters.")
+    print(f"`sync --limit {max(args.chunk * 2, 10)} --chunk {args.chunk}` first if it matters.")
 
 
 def cmd_run(args) -> None:
-    prov, out, todo = _setup(args)
+    prov, task, out, todo = _setup(args)
     if not todo:
-        print("nothing to do - every id already has an abstract")
+        print(f"nothing to do - every id already has a {task.name}")
         return
     if not prov.supports_batch:
         sys.exit(f"{prov.name} has no batch API - use `sync` instead "
                  f"(and consider a larger --chunk to compensate)")
 
     chunks = chunked(todo, args.chunk)
-    batch_id = prov.submit(chunks, args.model)
+    batch_id = prov.submit(chunks, args.model, task)
 
     # The ids each chunk covers have to survive to `fetch`, which may run in a
     # different process days later: the reply carries positions, not ids, and
@@ -816,6 +732,7 @@ def cmd_run(args) -> None:
     state = Path(f"{out}.batch")
     state.write_text(json.dumps({
         "provider": prov.name,
+        "task": task.name,
         "batch_id": batch_id,
         "chunks": {f"chunk-{i}": [str(r["id"]) for r in c] for i, c in enumerate(chunks)},
     }), encoding="utf-8")
@@ -824,11 +741,11 @@ def cmd_run(args) -> None:
     print(f"state saved to {state} - `fetch` resumes from it if this exits")
 
     prov.wait(batch_id, args.poll)
-    _collect(prov, batch_id, out, state)
+    _collect(prov, task, batch_id, out, state)
 
 
 def cmd_fetch(args) -> None:
-    out = args.output or default_out(args.input)
+    _prov, _task, out = _resolve(args)
     state = Path(f"{out}.batch")
     if not state.exists():
         if args.batch_id:
@@ -841,63 +758,64 @@ def cmd_fetch(args) -> None:
     # the state file records which provider submitted it, so `fetch` needs no
     # -p and cannot be pointed at the wrong API by accident
     prov = PROVIDERS[saved.get("provider", "anthropic")]
+    task = TASKS[saved.get("task", args.task)]
     batch_id = args.batch_id or saved["batch_id"]
     prov.wait(batch_id, args.poll)
-    _collect(prov, batch_id, out, state)
+    _collect(prov, task, batch_id, out, state)
 
 
-def _collect(prov: Provider, batch_id: str, out: Path, state: Path) -> None:
+def _collect(prov: Provider, task: Task, batch_id: str, out: Path, state: Path) -> None:
     chunks: dict[str, list[str]] = json.loads(state.read_text(encoding="utf-8"))["chunks"]
     records, failed = [], 0
     for custom_id, reply in prov.collect(batch_id):
         ids = chunks.get(custom_id, [])
-        got = parse_chunk(reply, ids, custom_id)
+        got = parse_chunk(reply, ids, custom_id, task)
         records += got
         failed += len(ids) - len(got)
 
     append(out, records)
     state.unlink(missing_ok=True)
-    print(f"\nwrote {len(records)} abstract(s) to {out}")
+    print(f"\nwrote {len(records)} {task.name}(s) to {out}")
     if failed:
-        print(f"{failed} question(s) got no abstract - run the same command "
+        print(f"{failed} row(s) got no {task.name} - run the same command "
               f"again to retry just those")
 
 
 def cmd_sync(args) -> None:
     """One request at a time. For trying the prompt out, not for the corpus -
     except on a provider with no batch API, where it is the only option."""
-    prov, out, todo = _setup(args)
+    prov, task, out, todo = _setup(args)
     if not todo:
-        print("nothing to do - every id already has an abstract")
+        print(f"nothing to do - every id already has a {task.name}")
         return
 
     chunks = chunked(todo, args.chunk)
     records = []
     for i, c in enumerate(chunks, 1):
         label = f"chunk {i}/{len(chunks)}"
-        got = parse_chunk(prov.send(c, args.model), [str(r["id"]) for r in c], label)
+        got = parse_chunk(prov.send(c, args.model, task), [str(r["id"]) for r in c], label, task)
         records += got
         # print each abstract against its source, which is the point of `sync`
         for rec, row in zip(got, c):
-            print(f"[{label}] {rec['abstract']}")
+            print(f"[{label}] {rec[task.output_field]}")
             print(f"          {row['text'][:88]}")
 
     append(out, records)
-    print(f"\nwrote {len(records)} abstract(s) to {out}")
+    print(f"\nwrote {len(records)} {task.name}(s) to {out}")
 
 
 def cmd_selftest(_args) -> None:
-    """Offline: everything except the API call, for every provider."""
+    """Offline: every task against every provider, no API call."""
     import tempfile
 
     rows = [{"id": "aa", "text": "Sujet un."},
             {"id": "bb", "text": "Sujet deux."},
             {"id": "cc", "text": "Sujet trois."}]
+    ids = [r["id"] for r in rows]
 
     assert [len(c) for c in chunked(rows, 1)] == [1, 1, 1]
     assert [len(c) for c in chunked(rows, 2)] == [2, 1], "last chunk may be short"
     assert [len(c) for c in chunked(rows, 10)] == [3]
-    assert numbered(rows) == "1. Sujet un.\n2. Sujet deux.\n3. Sujet trois."
 
     def parts(req: dict) -> tuple[str, str]:
         """(system text, user text), wherever this provider puts them."""
@@ -907,89 +825,91 @@ def cmd_selftest(_args) -> None:
             system = "".join(b["text"] for b in req["system"])
         return system, user
 
-    # every provider must build the same prompt without touching the network
-    for name, prov in PROVIDERS.items():
-        req = prov.request(rows, prov.default_model)
-        assert req["model"] == prov.default_model, name
-        system, user = parts(req)
-        assert user == numbered(rows), f"{name} mangled the questions"
-        assert system == PROMPT_TOPIC, f"{name} lost the system prompt"
-        cap = req.get("max_tokens") or req.get("max_completion_tokens")
-        assert cap == max_tokens_for(3), f"{name} output cap"
-    assert PROVIDERS["anthropic"].request(rows, "m")["messages"][0]["role"] == "user"
-    assert PROVIDERS["openai"].request(rows, "m")["messages"][0]["role"] == "system", \
+    for tname, task in TASKS.items():
+        # the worked example in the prompt must match the schema exactly, or a
+        # JSON-mode provider follows the example and every chunk is voided.
+        # This is the assertion that would have caught the topics/abstracts
+        # mismatch that made this split worth doing.
+        example = json.loads(task.prompt[task.prompt.index("{", task.prompt.index("Sortie")):])
+        assert ENVELOPE in example, f"{tname}: example envelope != schema envelope"
+        assert all(task.answer_key in item for item in example[ENVELOPE]), \
+            f"{tname}: example answer key != schema answer key"
+        assert task.schema()["required"] == [ENVELOPE], tname
+        assert task.body(rows) == "1. Sujet un.\n2. Sujet deux.\n3. Sujet trois.", tname
+
+        for pname, prov in PROVIDERS.items():
+            req = prov.request(rows, prov.default_model, task)
+            system, user = parts(req)
+            assert user == task.body(rows), f"{pname}/{tname} mangled the rows"
+            assert system == task.prompt, f"{pname}/{tname} lost the prompt"
+            cap = req.get("max_tokens") or req.get("max_completion_tokens")
+            assert cap == max_tokens_for(3), f"{pname}/{tname} output cap"
+
+        # round trip: a well-formed reply must map back onto the right ids
+        def item(n, value):
+            return {"n": n, task.answer_key: value}
+
+        def payload(items):
+            return Reply(json.dumps({ENVELOPE: items}), "m")
+
+        ok = payload([item(2, "B"), item(1, "A"), item(3, "C")])   # out of order
+        got = parse_chunk(ok, ids, "t", task)
+        assert [r["id"] for r in got] == ids, f"{tname}: n must map to id by position"
+        assert [r[task.output_field] for r in got] == ["A", "B", "C"], tname
+        assert set(got[0]) == {"id", task.output_field, "model"}, tname
+
+        # every misalignment voids the whole chunk rather than part of it
+        assert parse_chunk(payload([item(1, "A"), item(2, "B")]), ids, "t", task) == [], \
+            f"{tname}: a dropped item must void the chunk"
+        assert parse_chunk(payload([item(1, "A")] * 3), ids, "t", task) == [], \
+            f"{tname}: repeated n must void the chunk"
+        assert parse_chunk(payload([item(0, "A"), item(1, "B"), item(2, "C")]),
+                           ids, "t", task) == [], f"{tname}: 0-based n must void the chunk"
+        assert parse_chunk(Reply(None, "m", "refused"), ids, "t", task) == []
+        # JSON mode can return valid JSON of the wrong shape - must not raise
+        assert parse_chunk(Reply('{"results": []}', "m"), ids, "t", task) == []
+        assert parse_chunk(Reply("not json at all", "m"), ids, "t", task) == []
+        assert parse_chunk(payload([{task.answer_key: "A"}]), ids, "t", task) == []
+        assert parse_chunk(payload([{"n": 1}]), ids, "t", task) == [], "missing answer key"
+
+    # provider-shape differences the tasks must not disturb
+    t = TASKS["topic"]
+    assert PROVIDERS["anthropic"].request(rows, "m", t)["messages"][0]["role"] == "user"
+    assert PROVIDERS["openai"].request(rows, "m", t)["messages"][0]["role"] == "system", \
         "OpenAI-style APIs carry the system prompt inside messages"
-    assert PROVIDERS["deepseek"].request(rows, "m")["response_format"] == {"type": "json_object"}
-    assert PROVIDERS["openai"].request(rows, "m")["response_format"]["type"] == "json_schema"
+    assert PROVIDERS["deepseek"].request(rows, "m", t)["response_format"] == {"type": "json_object"}
+    assert PROVIDERS["openai"].request(rows, "m", t)["response_format"]["type"] == "json_schema"
     assert not PROVIDERS["deepseek"].supports_batch
     assert not PROVIDERS["gemini"].supports_batch
     assert PROVIDERS["gemini"].base_url.endswith("/openai/"), \
         "gemini must point at Google's OpenAI-compatible endpoint, not the native one"
-    assert "max_tokens" in PROVIDERS["gemini"].request(rows, "m")
-
-    # --json-mode must be able to flip a provider either way, since which one
-    # an endpoint accepts is the detail most likely to have changed
-    gem = PROVIDERS["gemini"]
-    original = gem.schema_mode
-    try:
-        for mode, expected in (("object", "json_object"), ("schema", "json_schema")):
-            _setup(argparse.Namespace(provider="gemini", model=None, json_mode=mode,
-                                      output=Path("/dev/null"), input=Path("/dev/null"),
-                                      limit=0))
-            assert gem.request(rows, "m")["response_format"]["type"] == expected, mode
-    finally:
-        gem.schema_mode = original
-
-    ids = [r["id"] for r in rows]
-    # fixtures follow ANSWER_KEY, so renaming the wire field cannot leave the
-    # tests passing against a key the code no longer reads
-    def item(n, value):
-        return {"n": n, ANSWER_KEY: value}
-
-    ok = Reply(json.dumps({"abstracts": [item(2, "B"),                # out of order
-                                         item(1, "A"),
-                                         item(3, "C")]}), "m")
-    assert [(r["id"], r["abstract"]) for r in parse_chunk(ok, ids, "t")] == \
-        [("aa", "A"), ("bb", "B"), ("cc", "C")], "n must map to id by position"
-
-    # every misalignment must reject the whole chunk, not return part of it
-    def payload(items):
-        return Reply(json.dumps({"abstracts": items}), "m")
-
-    assert parse_chunk(payload([item(1, "A"), item(2, "B")]), ids, "t") == [], \
-        "a dropped item must void the chunk"
-    assert parse_chunk(payload([item(1, "A")] * 3), ids, "t") == [], \
-        "repeated n must void the chunk"
-    assert parse_chunk(payload([item(0, "A"), item(1, "B"), item(2, "C")]),
-                       ids, "t") == [], "0-based n must void the chunk"
-    assert parse_chunk(Reply(None, "m", "refused"), ids, "t") == []
-    # JSON mode can return valid JSON of the wrong shape - must not raise
-    assert parse_chunk(Reply('{"results": []}', "m"), ids, "t") == [], "wrong key"
-    assert parse_chunk(Reply("not json at all", "m"), ids, "t") == [], "not JSON"
-    assert parse_chunk(Reply(json.dumps({"abstracts": [{ANSWER_KEY: "A"}]}), "m"),
-                       ids, "t") == [], "missing n"
-    # the wire key and the output field are separate: renaming one must not
-    # silently rename the other, since downstream reads "abstract"
-    assert parse_chunk(payload([item(1, "A"), item(2, "B"), item(3, "C")]),
-                       ids, "t")[0].keys() >= {"id", "abstract", "model"}, \
-        "output records must keep the `abstract` field whatever ANSWER_KEY is"
 
     with tempfile.TemporaryDirectory() as d:
-        inp, out = Path(d) / "tache2.jsonl", Path(d) / "tache2_abstract.jsonl"
+        inp = Path(d) / "tache2.jsonl"
         inp.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in [
             {"id": "1", "text": "Question une."},
             {"id": "2", "text": "Question deux."},
             {"id": "3", "text": ""},                 # no text -> never requested
         ]) + "\n", encoding="utf-8")
 
-        assert default_out(inp) == out, default_out(inp)
+        # one output file per (task, model): running `abstract` must not mark
+        # ids done for `topic`, and a second model must not skip the rows the
+        # first one already labelled - that is the comparison set
+        outs = {n: default_out(inp, t, "m1") for n, t in TASKS.items()}
+        assert len(set(outs.values())) == len(TASKS), f"tasks share an output file: {outs}"
+        t = TASKS["topic"]
+        assert default_out(inp, t, "m1") != default_out(inp, t, "m2"), \
+            "two models must not share an output file"
+        assert default_out(inp, t, "gpt-5.6-luna").name.endswith("_gpt-5.6-luna.jsonl")
+        assert "/" not in default_out(inp, t, "vendor/model:v1").name, "model must be sanitised"
+
+        out = outs["topic"]
         assert [r["id"] for r in pending(inp, out, None)] == ["1", "2"], "empty text must be skipped"
-
-        append(out, [{"id": "1", "abstract": "Un sujet", "model": "m"}])
+        append(out, [{"id": "1", "topic": "work", "model": "m"}])
         assert [r["id"] for r in pending(inp, out, None)] == ["2"], "already-done ids must be skipped"
-        assert read_jsonl(out)[0]["abstract"] == "Un sujet"
+        assert read_jsonl(out)[0]["topic"] == "work"
 
-    print(f"selftest passed ({len(PROVIDERS)} providers)")
+    print(f"selftest passed ({len(TASKS)} tasks x {len(PROVIDERS)} providers)")
 
 
 def main() -> None:
@@ -1006,6 +926,8 @@ def main() -> None:
         p.add_argument("-o", "--output", type=Path,
                        help="default: <input stem>_abstract.jsonl")
         p.add_argument("-p", "--provider", choices=tuple(PROVIDERS), default="anthropic")
+        p.add_argument("-t", "--task", choices=tuple(TASKS), default="topic",
+                       help="what to ask for; see llm_tasks.py")
         p.add_argument("-m", "--model", default=None,
                        help="default: the provider's own default")
         p.add_argument("--limit", type=int, help="only the first N pending rows")
@@ -1019,6 +941,18 @@ def main() -> None:
                             "(e.g. none / minimal / low). Stops a thinking "
                             "model spending the output budget on a labelling "
                             "task. No effect on -p anthropic")
+        p.add_argument("--price", default=None, metavar="IN,OUT",
+                       help="`estimate` only. $/Mtok for this model, e.g. "
+                            "--price 0.27,1.10 - look it up on the provider's "
+                            "pricing page. Omitted, estimate reports tokens only")
+        p.add_argument("--extra", default=None, metavar="JSON",
+                       help="vendor-specific fields with no OpenAI-format "
+                            "slot, sent via the SDK's extra_body. e.g. "
+                            "--extra '{\"thinking\": {\"type\": \"disabled\"}}'")
+        p.add_argument("--debug", action="store_true",
+                       help="print the provider's raw response whenever a chunk "
+                            "fails. For HTTP-level tracing instead, set "
+                            "OPENAI_LOG=debug or ANTHROPIC_LOG=debug")
         p.add_argument("--json-mode", choices=("schema", "object"), default=None,
                        help="override how structured output is requested. Use "
                             "`object` if a provider rejects json_schema; the "

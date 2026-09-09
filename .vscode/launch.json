@@ -1,0 +1,51 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "abstract selftest",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/questions_processing/abstract.py",
+      "args": ["selftest"],
+      "cwd": "${workspaceFolder}/questions_processing",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "abstract sync (gemini, small)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/questions_processing/abstract.py",
+      "args": [
+        "sync",
+        "questions_reussir/tache2_no_semantic.jsonl",
+        "-p", "gemini",
+        "--limit", "5",
+        "--chunk", "1",
+        "--json-mode", "object"
+      ],
+      "cwd": "${workspaceFolder}/questions_processing",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "GEMINI_API_KEY": "your_key_here"
+      }
+    },
+    {
+      "name": "abstract sync (gemini, failing case)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/questions_processing/abstract.py",
+      "args": [
+        "sync",
+        "questions_reussir/tache2_no_semantic.jsonl",
+        "-p", "gemini",
+        "--limit", "40",
+        "--chunk", "40"
+      ],
+      "cwd": "${workspaceFolder}/questions_processing",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ]
+}
