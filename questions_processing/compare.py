@@ -37,6 +37,7 @@ import argparse
 import collections
 import json
 import sys
+import textwrap
 from pathlib import Path
 
 
@@ -63,6 +64,11 @@ def answer_field(rows: list[dict]) -> str:
     the answer is whatever is left once the two known keys are removed.
     """
     keys = {k for r in rows for k in r} - {"id", "model"}
+    # a hand-built gold file usually keeps `text` alongside the label, because
+    # you cannot label a question you cannot read. Ignore it when something
+    # else is present, rather than making people strip it first.
+    if len(keys) > 1:
+        keys -= {"text", "note"}
     if len(keys) != 1:
         sys.exit(f"cannot tell which field is the answer, candidates: {sorted(keys)}")
     return keys.pop()
@@ -89,12 +95,24 @@ def main() -> None:
     ap.add_argument("--gold", type=Path,
                     help="hand-labelled rows, to measure accuracy rather than agreement")
     ap.add_argument("-o", "--output", type=Path,
-                    help="disagreements file (default: <first input>_disagreements.jsonl)")
+                    help="disagreements file (default: beside the inputs, with "
+                         "the _<task>_<model> tail replaced by _disagreements)")
     ap.add_argument("--top", type=int, default=10, help="label pairs to list (default 10)")
     args = ap.parse_args()
 
     if len(args.files) < 2:
         sys.exit("give at least two files - there is nothing to compare otherwise")
+
+    # a glob can sweep up this script's own output; that is never an input
+    own = [f for f in args.files
+           if any("labels" in r for r in read_jsonl(f)[:1])]
+    if own:
+        for f in own:
+            print(f"  ! skipping {f.name} - that is a compare.py output, not a "
+                  f"model run", file=sys.stderr)
+        args.files = [f for f in args.files if f not in own]
+        if len(args.files) < 2:
+            sys.exit("nothing left to compare once those are removed")
 
     runs = [load(f) for f in args.files]
     names = [n for n, _ in runs]
@@ -145,11 +163,24 @@ def main() -> None:
         for label, n in sorted(involved.items(), key=lambda kv: -kv[1] / total[kv[0]]):
             print(f"  {n:4} / {total[label]:4}  {n / total[label]:5.0%}  {label}")
 
+    # the review queue and the blind-spot list both want the question text
+    text = {}
+    if args.source:
+        text = {str(r["id"]): r.get("text", "") for r in read_jsonl(args.source)}
+
+    # Drop the trailing _<task>_<model> so the result does not sit inside the
+    # glob people naturally use for the inputs (..._topic_*.jsonl) - otherwise
+    # the next run reads its own output back and cannot find an answer field.
+    stem = args.files[0].stem
+    base = "_".join(stem.split("_")[:-2]) or stem
+    out = args.output or args.files[0].with_name(f"{base}_disagreements.jsonl")
+
     # ---- optional: what agreement is actually worth -----------------------
     if args.gold:
         grows = read_jsonl(args.gold)
         gfield = answer_field(grows)
         gold = {str(r["id"]): r[gfield] for r in grows}
+        gold_text = {str(r["id"]): r["text"] for r in grows if r.get("text")}
         overlap = [(qid, labels) for qid, labels in agreed + disagreed if qid in gold]
         if not overlap:
             print(f"\n! --gold has no ids in common with the runs")
@@ -170,20 +201,41 @@ def main() -> None:
             for name, mapping in runs:
                 hit = sum(1 for qid, _ in overlap if mapping[qid] == gold[qid])
                 print(f"  {name:24} {hit:4} / {len(overlap):4}  {hit / len(overlap):5.0%} alone")
-            if ga:
-                hit, n = acc(ga)
-                if hit < n:
-                    print(f"\n  ! {n - hit} row(s) where both models agreed and both were "
-                          f"wrong.\n    That is systematic error - a rule problem, not a "
-                          f"labelling problem.")
+            # Every model agreeing on the wrong answer is the one failure the
+            # review queue cannot surface - those rows are in the *agreed*
+            # pile, so nobody ever looks at them. Print them.
+            blind = [(q, next(iter(l.values()))) for q, l in ga
+                     if next(iter(l.values())) != gold[q]]
+            if blind:
+                print(f"\n! {len(blind)} row(s) where every run agreed and every run was "
+                      f"wrong.\n  Systematic error: the rules said this, so it is a rule "
+                      f"problem, not a\n  labelling problem. These never reach the review "
+                      f"queue - they look settled.\n")
+                by_swap = collections.Counter((gold[q], said) for q, said in blind)
+                for (want, said), n in by_swap.most_common():
+                    print(f"  {n:3}  you said {want!r} -> every run said {said!r}")
+                shown = blind[:args.top]
+                for i, (qid, said) in enumerate(shown, 1):
+                    txt = gold_text.get(qid) or text.get(qid, "")
+                    print(f"\n  {i}. {qid}   you: {gold[qid]}   runs: {said}")
+                    if txt:
+                        for line in textwrap.wrap(txt, 92, initial_indent="     ",
+                                                  subsequent_indent="     "):
+                            print(line)
+                if len(blind) > len(shown):
+                    print(f"\n  ... and {len(blind) - len(shown)} more (raise --top)")
+
+                bs = out.with_name(f"{base}_blindspots.jsonl")
+                with bs.open("w", encoding="utf-8") as fh:
+                    for qid, said in blind:
+                        row = {"id": qid, "gold": gold[qid], "agreed": said}
+                        t = gold_text.get(qid) or text.get(qid, "")
+                        if t:
+                            row["text"] = t
+                        fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+                print(f"\n  wrote them to {bs}")
 
     # ---- the review queue --------------------------------------------------
-    text = {}
-    if args.source:
-        text = {str(r["id"]): r.get("text", "") for r in read_jsonl(args.source)}
-
-    out = args.output or args.files[0].with_name(
-        f"{args.files[0].stem}_disagreements.jsonl")
     with out.open("w", encoding="utf-8") as fh:
         for qid, labels in sorted(disagreed,
                                   key=lambda kl: -pairs[tuple(sorted(set(kl[1].values())))]):

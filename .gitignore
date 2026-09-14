@@ -37,3 +37,4 @@ questions_*/*_no_semantic.jsonl
 questions_*/*_review.jsonl
 *.xlsx
 ~$*
+questions_processing/gold_set/prompt_*

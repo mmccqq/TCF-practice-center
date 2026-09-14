@@ -7,18 +7,18 @@ chunking, the alignment check that makes chunking safe, resume-by-id, four
 providers, two batch dialects, and cost estimation. Task and provider vary
 independently:
 
-    # try the topic rules on 40 questions, free, immediate
-    python3 llm.py sync questions_reussir/tache2.jsonl -t topic -p gemini \
+    # try the theme rules on 40 questions, free, immediate
+    python3 llm.py sync questions_reussir/tache2.jsonl -t theme -p gemini \
         --limit 40 --chunk 40
 
     # what would the whole corpus cost?
-    python3 llm.py estimate questions_reussir/tache2.jsonl -t topic --chunk 40
+    python3 llm.py estimate questions_reussir/tache2.jsonl -t theme --chunk 40
 
     # the real run: submit a batch, wait, write results
-    python3 llm.py run questions_reussir/tache2.jsonl -t topic --chunk 40
+    python3 llm.py run questions_reussir/tache2.jsonl -t theme --chunk 40
 
     # resume after a crash (state, including task and provider, in <out>.batch)
-    python3 llm.py fetch questions_reussir/tache2.jsonl -t topic
+    python3 llm.py fetch questions_reussir/tache2.jsonl -t theme
 
 Input is any JSONL with `id` and `text`. Output defaults to
 <input stem>_<task>.jsonl - one file per task, so two tasks never collide and
@@ -38,7 +38,7 @@ COMMANDS
 PARAMETERS
     input                   (required) JSONL file with `id` and `text`.
 
-    -t, --task NAME         topic (default) | abstract. Defined in llm_tasks.py.
+    -t, --task NAME         theme (default) | abstract. Defined in llm_tasks.py.
 
     -p, --provider NAME     anthropic (default) | openai | deepseek | gemini.
 
@@ -55,9 +55,11 @@ PARAMETERS
     --limit N               Only the first N *pending* rows. For trying things
                             out; combine with --chunk.
 
-    --max-tokens N          Output budget per request, overriding 1500+100*chunk.
-                            Raise this on "ran out of output budget" - thinking
-                            tokens count against it.
+    --max-tokens N          Output ceiling per request, overriding the generous
+                            16000+100*chunk default. A ceiling is a runaway
+                            guard, not a size estimate - you are billed for what
+                            is generated, never for the headroom, so lower it
+                            only to cap a misbehaving model.
 
     --reasoning LEVEL       reasoning_effort for OpenAI-compatible providers
                             (none / minimal / low). Stops a thinking model
@@ -117,18 +119,12 @@ from llm_tasks import ENVELOPE, TASKS, Task
 
 DEFAULT_CHUNK = 1
 
-
-# Reasoning/thinking tokens count against the output ceiling on every current
-# model, and they are the reason this is so much larger than the answers need:
-# 40 labels are ~320 tokens, but the reasoning that produced them can be
-# thousands. When a run reports "ran out of output budget", raise this with
-# --max-tokens before touching --chunk - a smaller chunk also shrinks the
-# budget, so it usually makes the problem worse rather than better.
+# --max-tokens: overrides the ceiling below for one run.
 MAX_TOKENS_OVERRIDE: int | None = None
 
-# --debug: dump the provider's whole response whenever a chunk fails. The
-# decoded message says what went wrong; this says what the provider actually
-# sent, which is what you need when the two disagree.
+# --debug: dump the provider's whole request and response whenever a chunk
+# fails. The decoded message says what went wrong; this says what was actually
+# sent and received, which is what you need when the two disagree.
 DEBUG = False
 
 # --extra: vendor-specific fields the OpenAI shape has no slot for, e.g.
@@ -139,6 +135,21 @@ DEBUG = False
 EXTRA_BODY: dict = {}
 
 
+# `max_tokens` is a runaway guard, not a size estimate.
+#
+# It is a hard ceiling the model cannot see: generation is cut off mid-token
+# when it is reached, and reasoning tokens count against it. You are billed for
+# what is generated, never for the headroom - so a ceiling set close to the
+# expected output buys nothing, and costs you a truncated chunk every time the
+# model happens to think a little longer than it did last time.
+#
+# Hence something generous. It only has to be low enough that a model stuck in
+# a loop cannot bill you for 128k tokens, and low enough that one non-streaming
+# request finishes inside the SDK's HTTP timeout.
+def max_tokens_for(chunk: int) -> int:
+    return MAX_TOKENS_OVERRIDE or (16000 + 100 * chunk)
+
+
 def dump(label: str, obj) -> None:
     if not DEBUG:
         return
@@ -146,10 +157,6 @@ def dump(label: str, obj) -> None:
     print(f"  ~ {label} raw response:\n"
           + json.dumps(body, indent=1, ensure_ascii=False, default=str),
           file=sys.stderr)
-
-
-def max_tokens_for(chunk: int) -> int:
-    return MAX_TOKENS_OVERRIDE or (1500 + 100 * chunk)
 
 
 # --------------------------------------------------------------------------
@@ -549,11 +556,10 @@ PROVIDERS: dict[str, Provider] = {
     ),
     "deepseek": OpenAICompatible(
         name="deepseek", base_url="https://api.deepseek.com",
-        key_env="DEEPSEEK_API_KEY", default_model="deepseek-v4-pro",
+        key_env="DEEPSEEK_API_KEY", default_model="deepseek-v4-flash",
         # DeepSeek offers JSON mode, not schema enforcement, and has no batch
         # API - both were true at the time of writing; check their docs.
         schema_mode="json_object", token_param="max_tokens", supports_batch=False,
-        reasoning_effort="low", 
     ),
     # Google publishes an OpenAI-compatible endpoint for Gemini, so it needs no
     # new code - only this entry. AI Studio has a free tier, rate-limited per
@@ -828,7 +834,7 @@ def cmd_selftest(_args) -> None:
     for tname, task in TASKS.items():
         # the worked example in the prompt must match the schema exactly, or a
         # JSON-mode provider follows the example and every chunk is voided.
-        # This is the assertion that would have caught the topics/abstracts
+        # This is the assertion that would have caught the themes/abstracts
         # mismatch that made this split worth doing.
         example = json.loads(task.prompt[task.prompt.index("{", task.prompt.index("Sortie")):])
         assert ENVELOPE in example, f"{tname}: example envelope != schema envelope"
@@ -873,7 +879,7 @@ def cmd_selftest(_args) -> None:
         assert parse_chunk(payload([{"n": 1}]), ids, "t", task) == [], "missing answer key"
 
     # provider-shape differences the tasks must not disturb
-    t = TASKS["topic"]
+    t = TASKS["theme"]
     assert PROVIDERS["anthropic"].request(rows, "m", t)["messages"][0]["role"] == "user"
     assert PROVIDERS["openai"].request(rows, "m", t)["messages"][0]["role"] == "system", \
         "OpenAI-style APIs carry the system prompt inside messages"
@@ -893,21 +899,21 @@ def cmd_selftest(_args) -> None:
         ]) + "\n", encoding="utf-8")
 
         # one output file per (task, model): running `abstract` must not mark
-        # ids done for `topic`, and a second model must not skip the rows the
+        # ids done for `theme`, and a second model must not skip the rows the
         # first one already labelled - that is the comparison set
         outs = {n: default_out(inp, t, "m1") for n, t in TASKS.items()}
         assert len(set(outs.values())) == len(TASKS), f"tasks share an output file: {outs}"
-        t = TASKS["topic"]
+        t = TASKS["theme"]
         assert default_out(inp, t, "m1") != default_out(inp, t, "m2"), \
             "two models must not share an output file"
         assert default_out(inp, t, "gpt-5.6-luna").name.endswith("_gpt-5.6-luna.jsonl")
         assert "/" not in default_out(inp, t, "vendor/model:v1").name, "model must be sanitised"
 
-        out = outs["topic"]
+        out = outs["theme"]
         assert [r["id"] for r in pending(inp, out, None)] == ["1", "2"], "empty text must be skipped"
-        append(out, [{"id": "1", "topic": "work", "model": "m"}])
+        append(out, [{"id": "1", "theme": "work", "model": "m"}])
         assert [r["id"] for r in pending(inp, out, None)] == ["2"], "already-done ids must be skipped"
-        assert read_jsonl(out)[0]["topic"] == "work"
+        assert read_jsonl(out)[0]["theme"] == "work"
 
     print(f"selftest passed ({len(TASKS)} tasks x {len(PROVIDERS)} providers)")
 
@@ -926,16 +932,16 @@ def main() -> None:
         p.add_argument("-o", "--output", type=Path,
                        help="default: <input stem>_abstract.jsonl")
         p.add_argument("-p", "--provider", choices=tuple(PROVIDERS), default="anthropic")
-        p.add_argument("-t", "--task", choices=tuple(TASKS), default="topic",
+        p.add_argument("-t", "--task", choices=tuple(TASKS), default="theme",
                        help="what to ask for; see llm_tasks.py")
         p.add_argument("-m", "--model", default=None,
                        help="default: the provider's own default")
         p.add_argument("--limit", type=int, help="only the first N pending rows")
         p.add_argument("--max-tokens", type=int, default=None, metavar="N",
-                       help="output budget per request, overriding the "
-                            "1500+100*chunk default. Raise this when a run "
-                            "reports 'ran out of output budget' - thinking "
-                            "tokens count against it")
+                       help="output ceiling per request, overriding the "
+                            "generous 16000+100*chunk default. You are billed "
+                            "for what is generated, not for the headroom, so "
+                            "lower this only to cap a misbehaving model")
         p.add_argument("--reasoning", default=None, metavar="LEVEL",
                        help="reasoning_effort for OpenAI-compatible providers "
                             "(e.g. none / minimal / low). Stops a thinking "

@@ -57,6 +57,18 @@ class Question(Base):
     # for the high-frequency banks); 1 when loaded from un-deduplicated data
     occurrences: Mapped[int] = mapped_column(Integer, default=1)
 
+    # Filled by backend/load_labels.py from questions_processing/llm.py output.
+    # Nullable because labelling lags scraping: a question exists as soon as it
+    # is scraped, and acquires a theme only when a labelling run covers it.
+    #
+    # These live on the question rather than in a join table because there is
+    # exactly one current value of each, and the history that would justify a
+    # separate table belongs to the cluster model (see the design doc), not
+    # here. Indexed: "give me every question about transport" is a list-page
+    # query, not an analytics one.
+    theme: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
+    abstract: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
     __table_args__ = (
         Index("ix_questions_tache_period", "tache", "period"),
     )

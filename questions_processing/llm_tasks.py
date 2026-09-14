@@ -8,7 +8,7 @@ providers, batching - lives in llm.py and is identical for every task.
 
 Adding a task means adding a Task() here and nothing else:
 
-    python3 llm.py sync questions_reussir/tache2.jsonl --task topic
+    python3 llm.py sync questions_reussir/tache2.jsonl --task theme
 
 The single most important rule in this file: the prompt's worked example and
 the JSON schema must agree, because a provider offering JSON *mode* rather
@@ -99,107 +99,54 @@ class Task:
         return {"id": row_id, self.output_field: answer, "model": model}
 
 
-RULES_TOPIC = """\
-Each prompt describes a role-play situation with:
-a role for the examiner
-a role for the candidate
-a topic that the candidate must ask about
-Most prompts use generic wording such as “Je suis votre ami(e)... Vous me posez des questions...”. Ignore this generic structure. Only summarize the specific situation/topic that the candidate needs to ask about.
-For each numbered prompt, find the most suitable topic according to these rules below.
-Respond in JSON. Return exactly one object per prompt received, with the same n number, in the same order. Do not omit any, merge any, or add any.
+RULES_THEME = """\
+You classify French TCF Canada Tâche 2 role-play prompts by theme. Each prompt describes a situation: a role for the examiner(Je), a role for the candidate(Tu, vous), and candidate need to ask questions to get information about this situation. Almost all of them share the same structure (“I am your friend... You ask me questions...”).
+Read the situation, identify the subject and classify it using the themes below.
+The parenthetical hint list at the end of each prompt names the information the candidate must request. It is the strongest signal available for finding a subject. When two rules seem to fit, decide by asking which rule the HINTS point to, not the narrative.
+THEME (17 values):
+Travel & tourism: Is it a holiday plan the subject? Including tour plans, city sightseeing, someone's recent trip, getting to know a city. does not cover: A trip taken for sport → Sports & fitness a flat renting out is housing & real estate.
+Culture & entertainment: Are a specific cultural place or one-time public activity the subject? Places like Museums, libraries, cinemas as venues, theme parks, zoos and nature parks, board-game clubs, or activities like public festivals, concerts, shows, local customs and how people spend their evenings. does not cover: The content of a film or book → Media & reading; a municipal arts class → Education & courses
+Social life & event: Is the activity a social event that makes connections with other people the subject? Building and neighbourhood get-togethers, meeting people in a new city, weddings and parties as social events. does not cover: Anything centred on children or school → children & school, personal info -> getting to know a person.
+Housing & surroundings: Is the house or surrounding/community condition for living the subject? Renting or buying a home, flatshares, neighbourhood choice for moving, landlords, estate agents when housing is the subject. 
+Sports & fitness: Is sport the subject? Learning a sport goes to Education & courses
+Work & career: Jobs, workplaces, colleagues, hours and leave, interviews, career changes, running a business, remote work, paid domestic help. does not cover: Courses taken for a qualification → Education & courses
+Transport & mobility: Public transport, carpooling, cycling as a way of getting around, bike and car hire (including a bike hired for sightseeing while on holiday).
+Education & courses covers: Is learn something the subject?  any course, or workshop, whatever subject it teaches — cooking, swimming private tuition, municipal art classes  or the questions are about enrolling. The parenthetical hints are about fees and schedule.
+Food & dining: Is restaurants or food the subject? does not cover: A cookery or baking class → Education & courses; booking a venue for a party where food is incidental → Community & social life
+Shopping & consumer services: Buying and selling goods, second-hand furniture, shops, deliveries, producers selling direct, hire of objects
+Getting to know a person: Is knowing a person the subject? their routine, family and hobbies in general, their tastes and personality. The purpose of knowing may include buying a gift. does not cover: Questions confined to one domain: one job → Work & career, adapting to a new country → Immigration & settling in. 
+Children & school: Schools and enrolment, after-school activities, children's workshops.
+Media & reading: Is the content of Films, series, television programmes, books, blogs the subject?
+Immigration & settling in: Is immigration or settling the subject? The prompt must name it: adaptation, integration, difficulties, obstacles, changes of habit or lifestyle. 
+Everyday favours & errands: Is baby-sitting, pet-sitting or house-sitting the subject? Or subjects related to errands run for them: parcels, moving houses, airport pickups. 
+Volunteering & associations covers: Charities and voluntary associations, unpaid community work does not cover: Paid community or sports work → the relevant theme
+Health & public services covers: Healthcare systems, doctors, clinics, medication, sick leave
+Others: None of the above.
 
-RULE 1  Is the scenario about something that ALREADY HAPPENED, where
-        the candidate asks the examiner to recount it?
-        -> past event
-        (a wedding a colleague attended; a holiday tour a colleague had)
+---
 
-RULE 2  Is the CANDIDATE planning an occasion and asking for ideas
-        or help to make it happen?
-        -> organization
-        (preparing a Quebec-specialty meal; organising a birthday
-        party; hosting friends visiting your city)
+## OUTPUT
 
-RULE 3  Is someone ELSE hosting or running a gathering, and the
-        candidate asks for details or wants to join?
-        -> event
-        (a residents' evening; group jogging outings; an activity
-        for meeting new people)
-
-RULE 4  Is the subject learning, teaching, courses?
-        -> study
-        (music school lessons; a cooking teacher;)
-RULE 5  Is the subject how to MOVE AROUND a city — public transit,
-        cycling, driving, carpooling, routes, passes, parking?
-        -> transport
-        (public transport in a new city; commuting by bike;
-        carpooling with a neighbour)
-RULE 6  Does the candidate want to get a service in a location from a provider?
-        -> location
-        (sports club; restaurant, hotel room; toy library; car or bike rental; chalet rental;
-        home-cooking service; grocery delivery; amusement park; board game club; an online platform)
-
-RULE 7  Is it a trip or holiday being planned or chosen?
-        -> tour plan
-        (weekend on a budget; holidays via a travel agency;
-        destinations offered by an agency)
-
-RULE 8  Is it about where to live, moving, flatmates, or settling
-        into a neighbourhood?
-        -> housing&community
-        (room-sharing; renting a flat; finding housing; getting to
-        know the community)
-
-RULE 9  Is it about a job, career, workplace conditions, or hiring?
-        -> work
-        (interview preparation; working hours in Canada; a
-        colleague's career path)
-
-RULE 10  Is someone taking temporary responsibility for a living
-        being?
-        -> caretaking
-        (pet-sitting; dog-sitting)
-
-RULE 11 Is it buying or selling a specific object between
-        individuals?
-        -> commerce
-        (a first smartphone for a child; items a friend is selling; a gift to another person)
-
-RULE 12 Is it films, music, books, or media the examiner consumed?
-        -> media
-
-RULE 13 Is it volunteering or a non-profit association?
-        -> charity
-RULE 14  Does the candidate ask the examiner to describe a personal life or canadian's daily life?
-        -> personal_life
-        (a Canadian friend's current daily life)
-RULE 15 Is the situation about knowing a city? 
--> city
-RULE 15 None of the above -> other, and explain in note.
-
-BOUNDARY NOTES
-- RULE 2 vs RULE 3 turns on WHO is hosting, not on the subject. Read the examiner's opening line.
-- RULE 4 beats RULE 6.
-- RULE 6 beats RULE 7. Booking a specific hotel is location; choosing where to go is tour plan.
-- RULE 5 vs RULE 7 (travel): transport is daily mobility where you  live; travel is a trip or holiday. "How do I get to work" is   transport; "how do I get to Banff for the weekend" is travel.
-- RULE 14 loses to rules 1, 9, and 12. A colleague's career path is work. A film they saw is media. A wedding they attended is  past_event. Only unfocused "what is your life like" reaches 13.
+Return a JSON array. Exactly one object per input prompt, with the same `n`,
+in the same order. Do not omit, merge, or add entries.
 """
 
 
-TOPIC = Task(
-    name="topic",
-    answer_key="topic",
-    answer_description="exactly one of the labels defined in the rules",
-    rules=RULES_TOPIC,
+THEME = Task(
+    name="theme",
+    answer_key="theme",
+    answer_description="exactly one of the theme defined in the rules",
+    rules=RULES_THEME,
     examples=[
         ("Je travaille a l'accueil d'un club sportif de la ville. Vous envisagez "
          "de vous inscrire et vous me posez des questions (horaires, types de "
-         "cours, tarifs, etc.).", "location"),
+         "cours, tarifs, etc.).", "Sports & fitness"),
         ("Je suis votre voisin(e). Je m'absente en vacances et je cherche "
          "quelqu'un pour s'occuper de mon animal. Vous voulez en savoir plus "
-         "avant d'accepter (dates, soins, regles, etc.).", "caretaking"),
+         "avant d'accepter (dates, soins, regles, etc.).", "Everyday favours & errands"),
         ("Je suis un(e) collegue. J'ai participe a un mariage ce week-end. Vous "
          "voulez savoir comment s'est deroulee la ceremonie (repas, lieu, "
-         "ambiance, etc.).", "past event"),
+         "ambiance, etc.).", "Community & social life"),
     ],
 )
 
@@ -263,4 +210,4 @@ ABSTRACT = Task(
 )
 
 
-TASKS: dict[str, Task] = {t.name: t for t in (TOPIC, ABSTRACT)}
+TASKS: dict[str, Task] = {t.name: t for t in (THEME, ABSTRACT)}
