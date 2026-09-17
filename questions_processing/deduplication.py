@@ -83,7 +83,7 @@ if TYPE_CHECKING:                     # numpy is only needed by the semantic
 # 0.93 / 0.82 pair merged unrelated questions and flagged 100% of pairs for
 # review. At 0.95 the merges spot-check as genuine rewordings.
 AUTO_MERGE = 0.95   # >= this cosine  -> merged without review ("duplicate")
-REVIEW_LOW = 0.90   # [LOW, MERGE)    -> flagged as near-duplicate, NOT merged
+REVIEW_LOW = 0.94   # [LOW, MERGE)    -> flagged as near-duplicate, NOT merged
 MAX_CLUSTER = 6     # belt-and-braces cap; complete linkage is the real guard
 EMBED_MODEL = "intfloat/multilingual-e5-large"
 

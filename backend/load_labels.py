@@ -51,7 +51,7 @@ try:
 except ImportError:                                              # pragma: no cover
     fingerprint = None
 
-COLUMNS = {"theme", "abstract"}
+COLUMNS = {"theme", "abstract", "core_subject"}
 
 
 def read_jsonl(path: Path) -> list[dict]:

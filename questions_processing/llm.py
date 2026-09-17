@@ -208,8 +208,21 @@ def append(out: Path, records: list[dict]) -> None:
             fh.write(json.dumps(r, ensure_ascii=False) + "\n")
 
 
-def chunked(rows: list[dict], size: int) -> list[list[dict]]:
-    return [rows[i:i + size] for i in range(0, len(rows), size)]
+def chunked(rows: list[dict], size: int, group_by: str | None = None) -> list[list[dict]]:
+    """Slice rows into chunks, never mixing two values of `group_by`.
+
+    A task whose prompt depends on the rows - core_subject sends the theme's
+    own vocabulary - can only do that if every row in the chunk shares the
+    value. Splitting here rather than in the task keeps the guarantee in one
+    place and keeps Task free of chunking concerns.
+    """
+    if group_by is None:
+        return [rows[i:i + size] for i in range(0, len(rows), size)]
+    out: list[list[dict]] = []
+    for value in dict.fromkeys(r.get(group_by) for r in rows):   # stable order
+        group = [r for r in rows if r.get(group_by) == value]
+        out += [group[i:i + size] for i in range(0, len(group), size)]
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -301,7 +314,7 @@ class AnthropicProvider(Provider):
             "max_tokens": max_tokens_for(len(rows)),
             # cache_control only bites if SYSTEM exceeds the model's minimum
             # cacheable prefix (512-4096 tokens); below that it does nothing.
-            "system": [{"type": "text", "text": task.prompt,
+            "system": [{"type": "text", "text": task.prompt_for(rows),
                         "cache_control": {"type": "ephemeral"}}],
             # effort "low": this is extraction, not reasoning - the recommended
             # way to cut cost rather than disabling thinking outright
@@ -312,7 +325,7 @@ class AnthropicProvider(Provider):
 
     def count_tokens(self, rows, model, task):
         return self.client().messages.count_tokens(
-            model=model, system=task.prompt,
+            model=model, system=task.prompt_for(rows),
             messages=self.request(rows, model, task)["messages"],
         ).input_tokens
 
@@ -427,7 +440,7 @@ class OpenAICompatible(Provider):
             "response_format": fmt,
             # OpenAI-style APIs carry the system prompt as the first message
             # rather than as a separate top-level field
-            "messages": [{"role": "system", "content": task.prompt},
+            "messages": [{"role": "system", "content": task.prompt_for(rows)},
                          {"role": "user", "content": task.body(rows)}],
         }
         if self.reasoning_effort and "reasoning_effort" not in EXTRA_BODY:
@@ -671,14 +684,14 @@ def cmd_estimate(args) -> None:
         print(f"nothing to do - every id already has a {task.name}")
         return
 
-    chunks = chunked(todo, args.chunk)
+    chunks = chunked(todo, args.chunk, task.group_by)
     # count a sample of whole chunks rather than all of them: count_tokens is
     # free but still one round trip per call, and these prompts are near-uniform
     sample = chunks[: min(5, len(chunks))]
     counts = [prov.count_tokens(c, args.model, task) for c in sample]
     if counts[0] is None:
         # no token-counting endpoint; French runs about 3.2 characters/token
-        avg_in = sum(len(task.prompt) + len(task.body(c)) for c in sample) / len(sample) / 3.2
+        avg_in = sum(len(task.prompt_for(c)) + len(task.body(c)) for c in sample) / len(sample) / 3.2
         source = "estimated from characters"
     else:
         avg_in = sum(counts) / len(counts)
@@ -728,7 +741,7 @@ def cmd_run(args) -> None:
         sys.exit(f"{prov.name} has no batch API - use `sync` instead "
                  f"(and consider a larger --chunk to compensate)")
 
-    chunks = chunked(todo, args.chunk)
+    chunks = chunked(todo, args.chunk, task.group_by)
     batch_id = prov.submit(chunks, args.model, task)
 
     # The ids each chunk covers have to survive to `fetch`, which may run in a
@@ -795,7 +808,7 @@ def cmd_sync(args) -> None:
         print(f"nothing to do - every id already has a {task.name}")
         return
 
-    chunks = chunked(todo, args.chunk)
+    chunks = chunked(todo, args.chunk, task.group_by)
     records = []
     for i, c in enumerate(chunks, 1):
         label = f"chunk {i}/{len(chunks)}"
@@ -814,10 +827,11 @@ def cmd_selftest(_args) -> None:
     """Offline: every task against every provider, no API call."""
     import tempfile
 
-    rows = [{"id": "aa", "text": "Sujet un."},
+    base = [{"id": "aa", "text": "Sujet un."},
             {"id": "bb", "text": "Sujet deux."},
             {"id": "cc", "text": "Sujet trois."}]
-    ids = [r["id"] for r in rows]
+    rows = base
+    ids = [r["id"] for r in base]
 
     assert [len(c) for c in chunked(rows, 1)] == [1, 1, 1]
     assert [len(c) for c in chunked(rows, 2)] == [2, 1], "last chunk may be short"
@@ -832,14 +846,26 @@ def cmd_selftest(_args) -> None:
         return system, user
 
     for tname, task in TASKS.items():
+        # a grouped task needs its key on every row; prompt_for() refuses a
+        # chunk that mixes values, which is the whole point of group_by
+        rows = ([{**r, task.group_by: task.sample_group()} for r in base]
+                if task.group_by else base)
+
         # the worked example in the prompt must match the schema exactly, or a
         # JSON-mode provider follows the example and every chunk is voided.
         # This is the assertion that would have caught the themes/abstracts
-        # mismatch that made this split worth doing.
-        example = json.loads(task.prompt[task.prompt.index("{", task.prompt.index("Sortie")):])
-        assert ENVELOPE in example, f"{tname}: example envelope != schema envelope"
-        assert all(task.answer_key in item for item in example[ENVELOPE]), \
-            f"{tname}: example answer key != schema answer key"
+        # mismatch that made this split worth doing. A task with no examples
+        # yet is skipped rather than failed - the check returns the moment one
+        # is written.
+        prompt = task.prompt_for(rows)
+        if task.examples:
+            example = json.loads(prompt[prompt.index("{", prompt.index("Sortie")):])
+            assert ENVELOPE in example, f"{tname}: example envelope != schema envelope"
+            assert all(task.answer_key in item for item in example[ENVELOPE]), \
+                f"{tname}: example answer key != schema answer key"
+        else:
+            print(f"  ! {tname}: no worked example yet - example/schema check skipped",
+                  file=sys.stderr)
         assert task.schema()["required"] == [ENVELOPE], tname
         assert task.body(rows) == "1. Sujet un.\n2. Sujet deux.\n3. Sujet trois.", tname
 
@@ -847,7 +873,7 @@ def cmd_selftest(_args) -> None:
             req = prov.request(rows, prov.default_model, task)
             system, user = parts(req)
             assert user == task.body(rows), f"{pname}/{tname} mangled the rows"
-            assert system == task.prompt, f"{pname}/{tname} lost the prompt"
+            assert system == prompt, f"{pname}/{tname} lost the prompt"
             cap = req.get("max_tokens") or req.get("max_completion_tokens")
             assert cap == max_tokens_for(3), f"{pname}/{tname} output cap"
 

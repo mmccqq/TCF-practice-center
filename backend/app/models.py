@@ -68,6 +68,11 @@ class Question(Base):
     # query, not an analytics one.
     theme: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
     abstract: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    # a finer label under `theme`, drawn from that theme's controlled
+    # vocabulary (llm_tasks.VOCABULARY). Indexed for the same reason as theme:
+    # "every question about renting a car" is a list query.
+    core_subject: Mapped[Optional[str]] = mapped_column(String(60), nullable=True,
+                                                        index=True)
 
     __table_args__ = (
         Index("ix_questions_tache_period", "tache", "period"),

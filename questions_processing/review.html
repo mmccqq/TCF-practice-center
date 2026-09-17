@@ -100,6 +100,14 @@
   button.merge[aria-pressed="true"]  { background: var(--merge);  border-color: var(--merge);  color: #fff; }
   button.reject[aria-pressed="true"] { background: var(--reject); border-color: var(--reject); color: #fff; }
 
+  .abstract {
+    font-size: 15.5px; font-weight: 650; margin-bottom: 8px;
+    display: flex; gap: 8px; align-items: baseline;
+  }
+  .abstract::before {
+    content: "abstract"; font: 11px ui-monospace, Menlo, monospace;
+    color: var(--muted); text-transform: uppercase; letter-spacing: .06em;
+  }
   .question { white-space: pre-wrap; margin-bottom: 12px; }
   .chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   button.chip { font-variant-numeric: tabular-nums; }
@@ -235,6 +243,15 @@ function candidates(p) {
 
 function labelBody(p, key) {
   const frag = document.createDocumentFragment();
+
+  if (p.abstract) {
+    const a = document.createElement("div");
+    a.className = "abstract";
+    const v = document.createElement("span");
+    v.textContent = p.abstract;     // textContent: it is model-generated text
+    a.append(v);
+    frag.append(a);
+  }
 
   const q = document.createElement("div");
   q.className = "question side";
@@ -496,8 +513,11 @@ $("export").onclick = () => {
     .map((p) => JSON.stringify(MODE === "dedup"
       ? { a_id: p.a_id, b_id: p.b_id, score: p.score, decision: decisions[keyOf(p)] }
       // same {id, <answer>, model} shape llm.py writes, so an adjudicated file
-      // is a drop-in gold set for `compare.py --gold`
-      : { id: p.id, topic: decisions[keyOf(p)], model: "human" }));
+      // loads straight through load_labels.py and doubles as a gold set.
+      // The key comes from the file (compare.py records which field the runs
+      // answered) - hardcoding it here once produced `topic` for a `theme`
+      // task, which load_labels.py rightly refused.
+      : { id: p.id, [p.field || "theme"]: decisions[keyOf(p)], model: "human" }));
   const stem = ($("filename").textContent || "review").replace(/\.jsonl$/, "");
   const url = URL.createObjectURL(
     new Blob([lines.join("\n") + "\n"], { type: "application/x-ndjson" }));

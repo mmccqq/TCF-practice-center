@@ -74,8 +74,8 @@ def answer_field(rows: list[dict]) -> str:
     return keys.pop()
 
 
-def load(path: Path) -> tuple[str, dict[str, str]]:
-    """(label for this file, {id: answer})."""
+def load(path: Path) -> tuple[str, str, dict[str, str]]:
+    """(model name, answer field, {id: answer})."""
     rows = read_jsonl(path)
     if not rows:
         sys.exit(f"{path} is empty")
@@ -83,15 +83,19 @@ def load(path: Path) -> tuple[str, dict[str, str]]:
     # the model that produced it names the column; fall back to the filename
     models = {r.get("model") for r in rows} - {None}
     name = models.pop() if len(models) == 1 else path.stem
-    return name, {str(r["id"]): r[field] for r in rows}
+    return name, field, {str(r["id"]): r[field] for r in rows}
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("files", nargs="+", type=Path, help="two or more llm.py output files")
-    ap.add_argument("--source", type=Path,
-                    help="the questions JSONL, to attach `text` to each disagreement")
+    ap.add_argument("--source", type=Path, action="append", default=[],
+                    metavar="FILE",
+                    help="JSONL carrying `text` and/or `abstract`, attached to "
+                         "each disagreement so the review page is readable. "
+                         "Repeatable - the questions and the abstracts usually "
+                         "live in different files")
     ap.add_argument("--gold", type=Path,
                     help="hand-labelled rows, to measure accuracy rather than agreement")
     ap.add_argument("-o", "--output", type=Path,
@@ -114,7 +118,15 @@ def main() -> None:
         if len(args.files) < 2:
             sys.exit("nothing left to compare once those are removed")
 
-    runs = [load(f) for f in args.files]
+    loaded = [load(f) for f in args.files]
+    # the field every run answered in - written into the review file so the
+    # review page exports decisions under the same key, instead of guessing
+    fields = {f for _, f, _ in loaded}
+    if len(fields) > 1:
+        sys.exit(f"the runs answer different fields {sorted(fields)} - "
+                 f"they are not the same task")
+    field = fields.pop()
+    runs = [(n, m) for n, _, m in loaded]
     names = [n for n, _ in runs]
     if len(set(names)) != len(names):
         sys.exit(f"two inputs report the same model {names} - "
@@ -163,10 +175,21 @@ def main() -> None:
         for label, n in sorted(involved.items(), key=lambda kv: -kv[1] / total[kv[0]]):
             print(f"  {n:4} / {total[label]:4}  {n / total[label]:5.0%}  {label}")
 
-    # the review queue and the blind-spot list both want the question text
-    text = {}
+    # the review queue and the blind-spot list both want the question text,
+    # and an abstract next to it makes a long French prompt skimmable
+    text: dict[str, str] = {}
+    abstract: dict[str, str] = {}
+    for path in args.source:
+        for r in read_jsonl(path):
+            qid = str(r.get("id", ""))
+            if not qid:
+                continue
+            if r.get("text"):
+                text[qid] = r["text"]
+            if r.get("abstract"):
+                abstract[qid] = r["abstract"]
     if args.source:
-        text = {str(r["id"]): r.get("text", "") for r in read_jsonl(args.source)}
+        print(f"\nsource: text for {len(text)} id(s), abstract for {len(abstract)}")
 
     # Drop the trailing _<task>_<model> so the result does not sit inside the
     # glob people naturally use for the inputs (..._topic_*.jsonl) - otherwise
@@ -229,6 +252,8 @@ def main() -> None:
                 with bs.open("w", encoding="utf-8") as fh:
                     for qid, said in blind:
                         row = {"id": qid, "gold": gold[qid], "agreed": said}
+                        if qid in abstract:
+                            row["abstract"] = abstract[qid]
                         t = gold_text.get(qid) or text.get(qid, "")
                         if t:
                             row["text"] = t
@@ -239,7 +264,10 @@ def main() -> None:
     with out.open("w", encoding="utf-8") as fh:
         for qid, labels in sorted(disagreed,
                                   key=lambda kl: -pairs[tuple(sorted(set(kl[1].values())))]):
-            row = {"id": qid, "pair": sorted(set(labels.values())), "labels": labels}
+            row = {"id": qid, "field": field,
+                   "pair": sorted(set(labels.values())), "labels": labels}
+            if qid in abstract:
+                row["abstract"] = abstract[qid]
             if text:
                 row["text"] = text.get(qid, "")
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
