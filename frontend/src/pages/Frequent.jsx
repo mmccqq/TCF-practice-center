@@ -2,59 +2,9 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { frequentSubjects } from '../lib/api'
-import { CheckIcon, ProgressBar, StarIcon, useProgress } from '../lib/progress'
+import { Marks, ProgressBar, useProgress } from '../lib/progress'
 
 const MIN_QUESTIONS = 2
-
-/** Star and tick for one question, or a sign-in link when signed out. */
-function Marks({ user, fId, practiced, bookmarked, togglePracticed, toggleBookmarked,
-                 small = false }) {
-  const isDone = practiced.has(fId)
-  const isSaved = bookmarked.has(fId)
-  const size = small ? 'scale-75' : ''
-  if (!user) {
-    return (
-      <Link
-        to="/login"
-        title="Sign in to bookmark questions and track your progress"
-        className={`flex shrink-0 gap-1 rounded-full p-0.5 text-slate-200 hover:text-slate-400 ${size}`}
-      >
-        <StarIcon done={false} />
-        <CheckIcon done={false} />
-      </Link>
-    )
-  }
-  return (
-    <div className={`flex shrink-0 items-center gap-1 ${size}`}>
-      <button
-        type="button"
-        onClick={() => toggleBookmarked.mutate({ fId, next: !isSaved })}
-        aria-pressed={isSaved}
-        aria-label={isSaved ? 'Bookmarked' : 'Bookmark this question'}
-        title={isSaved ? 'Bookmarked — click to remove' : 'Bookmark'}
-        className={`rounded-full p-0.5 transition ${
-          isSaved ? 'text-amber-500 hover:text-amber-600'
-                  : 'text-slate-300 hover:text-slate-500'
-        }`}
-      >
-        <StarIcon done={isSaved} />
-      </button>
-      <button
-        type="button"
-        onClick={() => togglePracticed.mutate({ fId, next: !isDone })}
-        aria-pressed={isDone}
-        aria-label={isDone ? 'Practised' : 'Mark as practised'}
-        title={isDone ? 'Practised — click to undo' : 'Mark as practised'}
-        className={`rounded-full p-0.5 transition ${
-          isDone ? 'text-emerald-600 hover:text-emerald-700'
-                 : 'text-slate-300 hover:text-slate-500'
-        }`}
-      >
-        <CheckIcon done={isDone} />
-      </button>
-    </div>
-  )
-}
 
 export default function Frequent() {
   const [params, setParams] = useSearchParams()

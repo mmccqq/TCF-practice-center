@@ -1,1 +1,38 @@
 @import "tailwindcss";
+
+/* A small paper-firework burst, fired when a question is marked practised.
+   Hand-rolled rather than pulling in a confetti library: twelve absolutely
+   positioned scraps and one keyframe, against ~3 KB of dependency.
+
+   Each piece is rotated to its own angle first and then thrown outwards along
+   that rotated axis, so one keyframe scatters them in every direction; the
+   per-piece angle, distance, spin and delay come in as custom properties. */
+@keyframes confetti-fly {
+  0% {
+    opacity: 1;
+    transform: rotate(var(--angle)) translateY(0) rotate(0deg) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(var(--angle)) translateY(calc(var(--distance) * -1))
+               rotate(var(--spin)) scale(0.6);
+  }
+}
+
+.confetti-piece {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 9px;
+  height: 14px;
+  margin: -7px 0 0 -4.5px;
+  border-radius: 2px;
+  animation: confetti-fly 800ms cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+}
+
+/* celebration is decoration; anyone who has asked for less motion gets none */
+@media (prefers-reduced-motion: reduce) {
+  .confetti-piece {
+    display: none;
+  }
+}

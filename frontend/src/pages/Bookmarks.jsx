@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { listBookmarks } from '../lib/api'
-import { CheckIcon, StarIcon, useProgress } from '../lib/progress'
+import { Marks, useProgress } from '../lib/progress'
 
 const TABS = [
   { tache: 2, label: 'Task 2' },
@@ -93,7 +93,6 @@ export default function Bookmarks() {
               // read the live sets, not the row's own flags: an optimistic
               // toggle updates those immediately, while this list only
               // refreshes once the request settles
-              const isSaved = bookmarked.has(q.f_id)
               const isDone = practiced.has(q.f_id)
               return (
                 <li
@@ -126,34 +125,12 @@ export default function Bookmarks() {
                     <p className="leading-relaxed">{q.text}</p>
                   </div>
 
-                  <div className="flex shrink-0 items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => toggleBookmarked.mutate({ fId: q.f_id, next: !isSaved })}
-                      aria-pressed={isSaved}
-                      aria-label={isSaved ? 'Bookmarked' : 'Bookmark this question'}
-                      title={isSaved ? 'Bookmarked — click to remove' : 'Bookmark'}
-                      className={`rounded-full p-0.5 transition ${
-                        isSaved ? 'text-amber-500 hover:text-amber-600'
-                                : 'text-slate-300 hover:text-slate-500'
-                      }`}
-                    >
-                      <StarIcon done={isSaved} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => togglePracticed.mutate({ fId: q.f_id, next: !isDone })}
-                      aria-pressed={isDone}
-                      aria-label={isDone ? 'Practised' : 'Mark as practised'}
-                      title={isDone ? 'Practised — click to undo' : 'Mark as practised'}
-                      className={`rounded-full p-0.5 transition ${
-                        isDone ? 'text-emerald-600 hover:text-emerald-700'
-                               : 'text-slate-300 hover:text-slate-500'
-                      }`}
-                    >
-                      <CheckIcon done={isDone} />
-                    </button>
-                  </div>
+                  <Marks
+                    user={user} fId={q.f_id}
+                    practiced={practiced} bookmarked={bookmarked}
+                    togglePracticed={togglePracticed}
+                    toggleBookmarked={toggleBookmarked}
+                  />
                 </li>
               )
             })}

@@ -1,4 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   addBookmark, getProgress, markPracticed, removeBookmark, unmarkPracticed,
 } from './api'
@@ -35,6 +37,116 @@ export function ProgressBar({ done, total, compact = false, label }) {
         {done}/{total}
       </span>
     </span>
+  )
+}
+
+const PIECES = 18
+const CONFETTI_COLORS = ['#f59e0b', '#10b981', '#38bdf8', '#a78bfa', '#fb7185', '#facc15']
+
+/** One burst of paper. Positioned over its parent, which must be `relative`. */
+function Confetti() {
+  // fixed for the life of this burst, or every re-render would reshuffle the
+  // scraps mid-flight
+  const pieces = useMemo(
+    () => Array.from({ length: PIECES }, (_, i) => ({
+      angle: (360 / PIECES) * i + (Math.random() * 24 - 12),
+      distance: 34 + Math.random() * 32,
+      spin: Math.random() * 540 - 270,
+      delay: Math.random() * 60,
+      color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+    })),
+    [],
+  )
+  return (
+    <span aria-hidden="true" className="pointer-events-none absolute inset-0">
+      {pieces.map((p, i) => (
+        <span
+          key={i}
+          className="confetti-piece"
+          style={{
+            '--angle': `${p.angle}deg`,
+            '--distance': `${p.distance}px`,
+            '--spin': `${p.spin}deg`,
+            animationDelay: `${p.delay}ms`,
+            background: p.color,
+          }}
+        />
+      ))}
+    </span>
+  )
+}
+
+/**
+ * The bookmark star and the practised tick for one question.
+ *
+ * Lives here because all three pages render this same pair, and a fourth copy
+ * of the JSX is where the three would start to disagree.
+ *
+ * Marking something practised fires a confetti burst; un-marking does not,
+ * because undoing is not an achievement.
+ */
+export function Marks({ user, fId, practiced, bookmarked, togglePracticed,
+                        toggleBookmarked, small = false }) {
+  const isDone = practiced.has(fId)
+  const isSaved = bookmarked.has(fId)
+  // a counter, not a boolean: the key restarts the animation when the same
+  // button is clicked again before the previous burst has finished
+  const [burst, setBurst] = useState(0)
+
+  useEffect(() => {
+    if (!burst) return undefined
+    const t = setTimeout(() => setBurst(0), 1000)
+    return () => clearTimeout(t)
+  }, [burst])
+
+  if (!user) {
+    return (
+      <Link
+        to="/login"
+        title="Sign in to bookmark questions and track your progress"
+        aria-label="Sign in to track your progress"
+        className={`flex shrink-0 gap-1 rounded-full p-0.5 text-slate-200
+                    hover:text-slate-400 ${small ? 'scale-75' : ''}`}
+      >
+        <StarIcon done={false} />
+        <CheckIcon done={false} />
+      </Link>
+    )
+  }
+
+  return (
+    <div className={`flex shrink-0 items-center gap-1 ${small ? 'scale-75' : ''}`}>
+      <button
+        type="button"
+        onClick={() => toggleBookmarked.mutate({ fId, next: !isSaved })}
+        aria-pressed={isSaved}
+        aria-label={isSaved ? 'Bookmarked' : 'Bookmark this question'}
+        title={isSaved ? 'Bookmarked — click to remove' : 'Bookmark'}
+        className={`rounded-full p-0.5 transition ${
+          isSaved ? 'text-amber-500 hover:text-amber-600'
+                  : 'text-slate-300 hover:text-slate-500'
+        }`}
+      >
+        <StarIcon done={isSaved} />
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          if (!isDone) setBurst((n) => n + 1)
+          togglePracticed.mutate({ fId, next: !isDone })
+        }}
+        aria-pressed={isDone}
+        aria-label={isDone ? 'Practised' : 'Mark as practised'}
+        title={isDone ? 'Practised — click to undo' : 'Mark as practised'}
+        className={`relative rounded-full p-0.5 transition ${
+          isDone ? 'text-emerald-600 hover:text-emerald-700'
+                 : 'text-slate-300 hover:text-slate-500'
+        }`}
+      >
+        <CheckIcon done={isDone} />
+        {burst > 0 && <Confetti key={burst} />}
+      </button>
+    </div>
   )
 }
 

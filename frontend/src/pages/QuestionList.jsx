@@ -2,7 +2,7 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { listQuestions, questionsMeta } from '../lib/api'
-import { CheckIcon, StarIcon, useProgress } from '../lib/progress'
+import { Marks, useProgress } from '../lib/progress'
 
 const PER_PAGE = 25
 
@@ -207,7 +207,6 @@ export default function QuestionList({ tache }) {
                 <ol className="mt-3 space-y-3">
                   {group.map((q) => {
                     const isDone = practiced.has(q.f_id)
-                    const isSaved = bookmarked.has(q.f_id)
                     return (
                     <li
                       key={q.id}
@@ -248,52 +247,12 @@ export default function QuestionList({ tache }) {
                       <p className="leading-relaxed">{q.text}</p>
                      </div>
 
-                      {/* signed out, both icons link to sign-in rather than
-                          being dead controls or silent 401s */}
-                      <div className="flex shrink-0 items-center gap-1">
-                        {user ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => toggleBookmarked.mutate({ fId: q.f_id, next: !isSaved })}
-                              aria-pressed={isSaved}
-                              aria-label={isSaved ? 'Bookmarked' : 'Bookmark this question'}
-                              title={isSaved ? 'Bookmarked — click to remove' : 'Bookmark'}
-                              className={`rounded-full p-0.5 transition ${
-                                isSaved ? 'text-amber-500 hover:text-amber-600'
-                                        : 'text-slate-300 hover:text-slate-500'
-                              }`}
-                            >
-                              <StarIcon done={isSaved} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => togglePracticed.mutate({ fId: q.f_id, next: !isDone })}
-                              aria-pressed={isDone}
-                              aria-label={isDone ? 'Practised' : 'Mark as practised'}
-                              title={isDone
-                                ? 'Practised — click to undo. Covers every month this question appears in.'
-                                : 'Mark as practised'}
-                              className={`rounded-full p-0.5 transition ${
-                                isDone ? 'text-emerald-600 hover:text-emerald-700'
-                                       : 'text-slate-300 hover:text-slate-500'
-                              }`}
-                            >
-                              <CheckIcon done={isDone} />
-                            </button>
-                          </>
-                        ) : (
-                          <Link
-                            to="/login"
-                            title="Sign in to bookmark questions and track your progress"
-                            aria-label="Sign in to track your progress"
-                            className="flex gap-1 rounded-full p-0.5 text-slate-200 hover:text-slate-400"
-                          >
-                            <StarIcon done={false} />
-                            <CheckIcon done={false} />
-                          </Link>
-                        )}
-                      </div>
+                      <Marks
+                        user={user} fId={q.f_id}
+                        practiced={practiced} bookmarked={bookmarked}
+                        togglePracticed={togglePracticed}
+                        toggleBookmarked={toggleBookmarked}
+                      />
                     </li>
                     )
                   })}
