@@ -33,10 +33,13 @@ export function StarIcon({ done }) {
  * the same cache entry, which is what makes twelve cards of a recurring
  * question flip together from one click.
  *
- * `extraInvalidate` lets a caller refresh a second query - the bookmarks page
- * has to re-fetch its rows when one is un-bookmarked.
+ * A bookmark toggle also invalidates the bookmarks list, wherever it was
+ * triggered from. Without that, starring a question on the list page leaves
+ * ['bookmarks'] holding a cached result that staleTime (60s) considers fresh,
+ * so opening the bookmarks page shows yesterday's answer until it expires or
+ * the tab is reloaded.
  */
-export function useProgress(tache, { extraInvalidate } = {}) {
+export function useProgress(tache) {
   const { user } = useAuth()
   const qc = useQueryClient()
   const key = ['progress', tache]
@@ -54,16 +57,14 @@ export function useProgress(tache, { extraInvalidate } = {}) {
     user,
     practiced,
     bookmarked,
-    togglePracticed: useToggle(key, 'practiced', markPracticed, unmarkPracticed,
-                               extraInvalidate),
-    toggleBookmarked: useToggle(key, 'bookmarked', addBookmark, removeBookmark,
-                                extraInvalidate),
+    togglePracticed: useToggle(key, 'practiced', markPracticed, unmarkPracticed),
+    toggleBookmarked: useToggle(key, 'bookmarked', addBookmark, removeBookmark),
   }
 }
 
 // a hook, so it is called at the top level of useProgress rather than inside a
 // closure - two calls, always in the same order, which is what React requires
-function useToggle(key, field, on, off, extraInvalidate) {
+function useToggle(key, field, on, off) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ fId, next }) => (next ? on(fId) : off(fId)),
@@ -82,7 +83,10 @@ function useToggle(key, field, on, off, extraInvalidate) {
     onError: (_e, _v, ctx) => qc.setQueryData(key, ctx?.prev),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: key })
-      if (extraInvalidate) qc.invalidateQueries({ queryKey: extraInvalidate })
+      // prefix match, so both tasks' bookmark lists are refreshed. Practising
+      // does not affect membership, so it does not need this - the bookmarks
+      // page reads the tick state from the id sets above, not from its rows.
+      if (field === 'bookmarked') qc.invalidateQueries({ queryKey: ['bookmarks'] })
     },
   })
 }

@@ -22,10 +22,10 @@ export default function Bookmarks() {
   const [tache, setTache] = useState(2)
   const bookmarksKey = ['bookmarks', tache]
 
-  // un-bookmarking from this page has to drop the row, not just dim the star,
-  // so the toggle invalidates the list as well as the id sets
+  // toggling a bookmark invalidates ['bookmarks'] from inside useProgress, so
+  // un-starring a row here drops it from the list without extra wiring
   const { user, practiced, bookmarked, togglePracticed, toggleBookmarked } =
-    useProgress(tache, { extraInvalidate: bookmarksKey })
+    useProgress(tache)
 
   const { data, isPending, isError, error } = useQuery({
     queryKey: bookmarksKey,
