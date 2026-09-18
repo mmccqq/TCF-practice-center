@@ -1,7 +1,12 @@
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import {
+  useInfiniteQuery, useMutation, useQuery, useQueryClient,
+} from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
-import { listQuestions, questionsMeta } from '../lib/api'
+import { Link, useSearchParams } from 'react-router-dom'
+import {
+  listAttempts, listQuestions, markPracticed, questionsMeta, unmarkPracticed,
+} from '../lib/api'
+import { useAuth } from '../lib/auth'
 
 const PER_PAGE = 25
 
@@ -15,6 +20,17 @@ function periodLabel(period) {
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
   return `${months[Number(m) - 1] ?? m} ${y}`
+}
+
+function CheckIcon({ done }) {
+  return (
+    <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none"
+         stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" fill={done ? 'currentColor' : 'none'} />
+      <path d="M8 12.4l2.6 2.6L16 9.6" strokeLinecap="round" strokeLinejoin="round"
+            stroke={done ? '#fff' : 'currentColor'} />
+    </svg>
+  )
 }
 
 function groupByPeriod(items) {
@@ -48,6 +64,35 @@ export default function QuestionList({ tache }) {
     })
     setParams(next)
   }
+
+  const { user } = useAuth()
+  const qc = useQueryClient()
+
+  // one flat list of practised f_ids for the whole task, fetched once, instead
+  // of a request per card. Skipped entirely when nobody is signed in.
+  const attemptsKey = ['attempts', tache]
+  const { data: attempts } = useQuery({
+    queryKey: attemptsKey,
+    queryFn: () => listAttempts({ tache }),
+    enabled: !!user,
+  })
+  const done = new Set(attempts ?? [])
+
+  // optimistic: the tick flips immediately and rolls back if the request fails.
+  // Because the key is f_id, every card for the same question flips together -
+  // a question asked in twelve months shows twelve ticks from one click.
+  const toggle = useMutation({
+    mutationFn: ({ fId, next }) => (next ? markPracticed(fId) : unmarkPracticed(fId)),
+    onMutate: async ({ fId, next }) => {
+      await qc.cancelQueries({ queryKey: attemptsKey })
+      const prev = qc.getQueryData(attemptsKey)
+      qc.setQueryData(attemptsKey, (old = []) =>
+        next ? [...old, fId] : old.filter((x) => x !== fId))
+      return { prev }
+    },
+    onError: (_err, _vars, ctx) => qc.setQueryData(attemptsKey, ctx?.prev),
+    onSettled: () => qc.invalidateQueries({ queryKey: attemptsKey }),
+  })
 
   // the theme list is per task: Task 2 and Task 3 do not share a vocabulary
   const { data: meta } = useQuery({
@@ -174,8 +219,16 @@ export default function QuestionList({ tache }) {
                 </h2>
 
                 <ol className="mt-3 space-y-3">
-                  {group.map((q) => (
-                    <li key={q.id} className="rounded-lg border border-slate-200 bg-white p-4">
+                  {group.map((q) => {
+                    const isDone = done.has(q.f_id)
+                    return (
+                    <li
+                      key={q.id}
+                      className={`flex items-start gap-3 rounded-lg border p-4 ${
+                        isDone ? 'border-emerald-200 bg-emerald-50/40' : 'border-slate-200 bg-white'
+                      }`}
+                    >
+                     <div className="min-w-0 flex-1">
                       {(q.theme || q.core_subject || q.month_sightings > 1
                         || q.months_seen > 1) && (
                         <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
@@ -206,8 +259,39 @@ export default function QuestionList({ tache }) {
                         </div>
                       )}
                       <p className="leading-relaxed">{q.text}</p>
+                     </div>
+
+                      {/* signed out, the tick is a link to sign in rather than a
+                          dead control or a silent 401 */}
+                      {user ? (
+                        <button
+                          type="button"
+                          onClick={() => toggle.mutate({ fId: q.f_id, next: !isDone })}
+                          aria-pressed={isDone}
+                          aria-label={isDone ? 'Practised' : 'Mark as practised'}
+                          title={isDone
+                            ? 'Practised — click to undo. Covers every month this question appears in.'
+                            : 'Mark as practised'}
+                          className={`shrink-0 rounded-full p-0.5 transition ${
+                            isDone ? 'text-emerald-600 hover:text-emerald-700'
+                                   : 'text-slate-300 hover:text-slate-500'
+                          }`}
+                        >
+                          <CheckIcon done={isDone} />
+                        </button>
+                      ) : (
+                        <Link
+                          to="/login"
+                          title="Sign in to track what you have practised"
+                          aria-label="Sign in to track your progress"
+                          className="shrink-0 rounded-full p-0.5 text-slate-200 hover:text-slate-400"
+                        >
+                          <CheckIcon done={false} />
+                        </Link>
+                      )}
                     </li>
-                  ))}
+                    )
+                  })}
                 </ol>
               </section>
             ))}

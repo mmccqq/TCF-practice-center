@@ -37,48 +37,6 @@ class User(Base):
                                                      cascade="all, delete-orphan")
 
 
-class Question(Base):
-    __tablename__ = "questions"
-
-    # the scrapers' 13-digit id: source|year|month|tache|partie|sujet
-    id: Mapped[str] = mapped_column(String(20), primary_key=True)
-    tache: Mapped[int] = mapped_column(Integer, index=True)
-    text: Mapped[str] = mapped_column(Text)
-    source: Mapped[str] = mapped_column(String(32), index=True)
-    year: Mapped[int] = mapped_column(Integer, index=True)
-    month: Mapped[int] = mapped_column(Integer)
-    # "YYYY-MM", denormalised so the API can sort/filter by date without
-    # recomputing it on every request
-    period: Mapped[str] = mapped_column(String(7), index=True)
-    partie: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    sujet: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    source_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    # how many raw scraped rows collapsed into this question (phase 2 uses it
-    # for the high-frequency banks); 1 when loaded from un-deduplicated data
-    occurrences: Mapped[int] = mapped_column(Integer, default=1)
-
-    # Filled by backend/load_labels.py from questions_processing/llm.py output.
-    # Nullable because labelling lags scraping: a question exists as soon as it
-    # is scraped, and acquires a theme only when a labelling run covers it.
-    #
-    # These live on the question rather than in a join table because there is
-    # exactly one current value of each, and the history that would justify a
-    # separate table belongs to the cluster model (see the design doc), not
-    # here. Indexed: "give me every question about transport" is a list-page
-    # query, not an analytics one.
-    theme: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
-    abstract: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
-    # a finer label under `theme`, drawn from that theme's controlled
-    # vocabulary (llm_tasks.VOCABULARY). Indexed for the same reason as theme:
-    # "every question about renting a car" is a list query.
-    core_subject: Mapped[Optional[str]] = mapped_column(String(60), nullable=True,
-                                                        index=True)
-
-    __table_args__ = (
-        Index("ix_questions_tache_period", "tache", "period"),
-    )
-
-
 # --------------------------------------------------------------------------
 # The four-layer question model (see "Core question set design.md").
 #
@@ -265,18 +223,25 @@ class ListQuestion(Base):
 
 
 class Attempt(Base):
-    """Phase 2 progress tracking. Created now so the schema does not need a
-    breaking migration later; unused by the phase 0 UI."""
+    """Phase 2 progress tracking. Unused by the phase 0 UI.
+
+    Keyed on the **fingerprint**, not on a list row. "Tried" means tried this
+    question, not tried September's copy of it, so practising a question in one
+    month marks it practised in every month it recurs in - and because the
+    fingerprint derives from the text rather than from a scraper id that can
+    move, progress survives a re-scrape.
+    """
 
     __tablename__ = "attempts"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    question_id: Mapped[str] = mapped_column(ForeignKey("questions.id", ondelete="CASCADE"), index=True)
+    f_id: Mapped[int] = mapped_column(ForeignKey("fingerprints.id", ondelete="CASCADE"),
+                                      index=True)
     practiced: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True),
                                                     default=utcnow, onupdate=utcnow)
 
     user: Mapped["User"] = relationship(back_populates="attempts")
 
-    __table_args__ = (UniqueConstraint("user_id", "question_id", name="uq_attempt_user_question"),)
+    __table_args__ = (UniqueConstraint("user_id", "f_id", name="uq_attempt_user_fingerprint"),)

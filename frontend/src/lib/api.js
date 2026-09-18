@@ -42,6 +42,15 @@ export const listQuestions = (params) =>
   api(`/api/questions?${new URLSearchParams(params)}`)
 
 // params is optional: {tache} scopes the filter options to one task
+// Practice tracking. Keyed on f_id (the question), not on the list row, so
+// marking a question done marks every month it appears in.
+export const listAttempts = (params) =>
+  api(`/api/attempts?${new URLSearchParams(params)}`, { auth: true })
+export const markPracticed = (fId) =>
+  api(`/api/attempts/${fId}`, { method: 'PUT', auth: true })
+export const unmarkPracticed = (fId) =>
+  api(`/api/attempts/${fId}`, { method: 'DELETE', auth: true })
+
 export const questionsMeta = (params) =>
   api('/api/questions/meta' + (params ? `?${new URLSearchParams(params)}` : ''))
 export const googleConfig = () => api('/api/auth/google/config')
