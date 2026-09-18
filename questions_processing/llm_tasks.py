@@ -122,7 +122,7 @@ Read the situation, identify the subject and classify it using the themes below.
 The parenthetical hint list at the end of each prompt is the strongest signal available for finding a subject. 
 When two rules seem to fit, decide by asking which rule the HINTS point to, not the narrative.
 THEME (17 values):
-Travel & tourism: Is it a holiday plan the subject? Including tour plans, city sightseeing, someone's recent trip, getting to know a city. does not cover: A trip taken for sport → Sports & fitness a flat renting out is housing & real estate.
+Travel & tourism: Is it travel, trip the subject? Including tour plans, city sightseeing, someone's recent trip, getting to know a city, language trip. does not cover: A trip taken for sport → Sports & fitness. a flat renting out is housing & real estate.
 Culture & entertainment: Are a specific cultural place or one-time public activity the subject? Places like Museums, libraries, cinemas as venues, theme parks, zoos and nature parks, board-game clubs, or activities like public festivals, concerts, shows, local customs and how people spend their evenings. does not cover: The content of a film or book → Media & reading; a municipal arts class → Education & courses
 Food & dining: Is knowing a restaurant or food, meal the subject? does not cover: A cookery or baking class → Education & courses; booking a venue for a party where food is incidental → Community & social life
 Social life & event: Is the activity a social event that makes connections with other people the subject? Building and neighbourhood get-togethers, meeting new people in a city, weddings and parties as social events. does not cover: Anything centred on children or school → children & school, personal info -> getting to know a person.
@@ -133,7 +133,7 @@ Transport & mobility: Public transport, carpooling, cycling as a way of getting 
 Education & courses covers: Is learn something the subject?  any course, or workshop, whatever subject it teaches — cooking, swimming private tuition, municipal art classes  or the questions are about enrolling. The parenthetical hints are about fees and schedule.
 Shopping & consumer services: Buying and selling goods, second-hand furniture, shops, deliveries, producers selling direct, hire of objects
 Getting to know a person: Is knowing a person the subject and purpose? their routine, family and hobbies in general, their preference and personality. This includes buying someone a gift. does not cover: Questions confined to one domain: one job → Work & career, adapting to a new country → Immigration & settling in. 
-Children & school: Is the subject related to school? Schools and enrolment, after-school activities, children's workshops.
+Children & school: Is the subject related to school? Schools and enrolment, after-school activities, children's workshops. Child-sitting task goes to tasks, work & career
 Media & reading: Is the content of Films, series, books, blogs the subject? Television show goes to Culture & entertainment.
 Immigration & settling in: Is immigration or settling the subject? The prompt must name it: adaptation, integration, difficulties, obstacles, changes of habit or lifestyle. 
 Volunteering & associations covers: Charities and voluntary associations, unpaid community work does not cover: Paid community or sports work → the relevant theme
@@ -245,36 +245,165 @@ ABSTRACT = Task(
 # to propose a label and flag it, which is the bootstrap for a theme you have
 # not curated.
 VOCABULARY: dict[str, list[str]] = {
-    "Travel & tourism": [],
-    "Culture & entertainment": [],
-    "Housing & surroundings": [],
-    "Tasks, work & career": [],
-    "Education & courses": [],
-    "Social life & event": [],
-    "Sports & fitness": [],
-    "Transport & mobility": [],
-    "Shopping & consumer services": [],
-    "Media & reading": [],
-    "Volunteering & associations": [],
-    "Children & school": [],
-    "Immigration & settling in": [],
-    "Food & dining": [],
-    "Getting to know a person": [],
-    "Everyday favours & errands": [],
-    "Health & public services": [],
-    "Work & career": [],
-}
+    "Children & school": [
+        "school party",
+        "enrollment",
+        "after-school activities",
+        "child workshop",
+        "schools",
+    ],
+    "Culture & entertainment": [
+        "amusement park",
+        "library",
+        "museums",
+        "television show",
+        "low-budget cultural activity",
+        "toy library",
+        "borrowing books",
+        "board game club",
+        "Canadian evening activities",
+        "choosing a film",
+        "film festival",
+        "New Year celebrations",
+        "music festival",
+        "artistic activity",
+        "bookshop game",
+        "concert",
+    ],
+    "Education & courses": [
+        "lessons",
+        "university course",
+        "community lessons",
+        "language stays",
+        "Continuing studies",
+    ],
+    "Food & dining": [
+        "restaurant",
+        "preparing a meal",
+        "home cooking services",
+    ],
+    "Getting to know a person": [
+        "personal life",
+        "gift",
+        "student's activities",
+    ],
+    "Health & public services": [
+        "doctor",
+        "healthcare system",
+    ],
+    "Housing & surroundings": [
+        "renting house",
+        "shared accommodation",
+        "neighborhood",
+        "renting out",
+        "buying a house",
+    ],
+    "Immigration & settling in": [
+        "settling experience",
+    ],
+    "Media & reading": [
+        "films",
+        "book",
+        "series",
+        "blog",
+        "newspaper"
+    ],
+    "Shopping & consumer services": [
+        "objects selling",
+        "smartphone",
+        "grocery delivery",
+        "shopping options",
+    ],
+    "Social life & event": [
+        "meeting new people",
+        "neighbour gathering",
+        "wedding",
+        "birthday party",
+        "friends visiting",
+        "gardening activities",
+        "retirement party",
+        "outings plateform",
+        "Restaurant opening event",
+    ],
+    "Sports & fitness": [
+        "sport club",
+        "training sessions",
+        "jogging outings",
+        "swimming pool",
+        "sport",
+    ],
+    "Tasks, work & career": [
+        "work condition",
+        "baby-sitting",
+        "job",
+        "pet-sitting",
+        "interview",
+        "moving house",
+        "remote working setup",
+        "delivery",
+        "change work",
+        "airport pickup",
+        "Personal shop",
+        "After-school childcare employment",
+        "house-sitting",
+    ],
+    "Transport & mobility": [
+        "public transport",
+        "carpooling",
+        "bicycle rental",
+        "commuting by bike",
+        "air travel",
+        "car rental",
+    ],
+    "Travel & tourism": [
+        "holiday trip",
+        "country trip",
+        "city trip",
+        "hotel",
+        "family trip",
+        "cruise",
+        "weekend trip",
+        "low-budget weekend trip",
+        "country trip experience",
+        "countryside trip",
+        "ski resort holidays",
+        "seaside holiday",
+        "favorite city",
+        "excursion",
+        "child’s vacation",
+        "accommodation options",
+    ],
+    "Volunteering & associations": [
+        "Volunteering & associations",
+    ],}
 
 
 RULES_CORE_SUBJECT = """\
-FILL THIS IN.
+You are annotating TCF Canada Speaking Task 2 role-play prompts (in French).
 
-Describe how to pick the core subject: the thing the candidate must request
-information about. The theme's controlled vocabulary is appended below at
-request time, so write the rules as if the list were already there.
+For each numbered sujet, extract the CORE SUBJECT: the topic that the
+candidate must request information about.
 
-Keep the output contract out of this text - the JSON envelope, the key and
-the worked example are generated from answer_key.
+METHOD
+1. Find the request clause: "vous me demandez / vous me posez des questions /
+   vous souhaitez vous renseigner sur ...". The grammatical object of that
+   clause is the core subject.
+2. IGNORE the interlocutor's role ("Je suis votre voisin(e)...", "Je travaille
+   dans...") unless it is the only clue to the topic.
+3. IGNORE the parenthetical enumeration (tarifs, horaires, etc.). Those are
+   aspects of the subject, never the subject itself.
+4. If the scenario is about someone's personal experience of X, the subject is
+   X, not "experience".
+
+OUTPUT FORMAT
+- A short English noun phrase, 1-4 words.
+- No articles, no verbs, no gerund unless unavoidable ("pet-sitting" ok).
+- Reuse a label from the CONTROLLED_VOCABULARY below whenever one fits
+  semantically, even if the wording differs. Only create a new label if none
+  of them fits.
+- Every sujet in one request shares a theme, so the vocabulary shown is the
+  one for that theme. The worked example further down illustrates the format
+  only; its labels may come from a different theme's list.
 """
 
 
@@ -317,9 +446,29 @@ CORE_SUBJECT = CoreSubjectTask(
                        "controlled vocabulary when one fits",
     rules=RULES_CORE_SUBJECT,
     group_by="theme",
-    # FILL THIS IN: three (question, answer) pairs. They are what the model
-    # actually imitates, so make them the shape you want back.
-    examples=[],
+    # Three real questions and the label each should get. These are what the
+    # model actually imitates, so they matter more than the rules above: each
+    # one demonstrates a METHOD step rather than just being a correct answer.
+    examples=[
+        # rule 1 + 3: the request clause is "des questions sur l'hotel", and
+        # the parenthetical is aspects, not the subject
+        ("Vous etes a l'hotel pour quelques jours. Je suis responsable de "
+         "l'accueil. Vous me posez des questions pour organiser votre sejour "
+         "(services, horaires, restauration, etc.).",
+         "hotel"),
+        # rule 2: the interlocutor is a travel agent, but the subject is the
+        # trip the candidate is asking about, not the agency
+        ("Je suis un(e) employe(e) dans une agence de voyages. Vous voulez "
+         "faire un voyage touristique. Vous me demandez des informations sur "
+         "les destinations (circuits touristiques, tarifs, activites, etc.).",
+         "tourist destinations"),
+        # rule 4: the friend's experience is the frame; the subject is the
+        # thing itself - pet-sitting, not "someone's experience of pet-sitting"
+        ("Je suis votre ami(e). Je cherche une personne pour garder mon animal "
+         "pendant mes vacances. Vous me posez des questions pour savoir si "
+         "vous pouvez le faire (dates, soins, regles, etc.).",
+         "pet-sitting"),
+    ],
 )
 
 

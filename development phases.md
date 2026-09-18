@@ -13,7 +13,8 @@ Phase 1:
 
 1. high frequency bank for 6 months and 12 months
 2. progress tracking for each user and each question(practiced or not)
-
+3. operating system 
+   
 Phase 2:
 material support
 1. task2 

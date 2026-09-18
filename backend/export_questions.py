@@ -23,11 +23,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
+
+from sqlalchemy import func              # noqa: E402
 
 from app.db import SessionLocal          # noqa: E402
 from app.models import Question          # noqa: E402
@@ -50,11 +53,31 @@ def main() -> None:
                          "groups by it. Repeatable")
     ap.add_argument("--source", choices=("formation", "reussir", "opal"),
                         help="only rows from this source")
+    ap.add_argument("--theme", action="append", default=[], metavar="NAME",
+                    help="only rows with this theme. Repeatable. Use --list-themes "
+                         "to see the exact spellings - they must match the "
+                         "database, and llm_tasks.VOCABULARY, character for "
+                         "character")
+    ap.add_argument("--list-themes", action="store_true",
+                    help="print the themes in the database with their counts, "
+                         "then exit")
     ap.add_argument("-o", "--output", type=Path,
                     help="default: questions_<n>_<source>_<filters>.jsonl in the cwd")
     args = ap.parse_args()
 
     with SessionLocal() as db:
+        if args.list_themes:
+            rows = (db.query(Question.theme, func.count(Question.id))
+                      .filter(Question.theme.isnot(None))
+                      .group_by(Question.theme)
+                      .order_by(func.count(Question.id).desc()).all())
+            for theme, n in rows:
+                print(f"  {n:5}  {theme}")
+            print(f"\n  {len(rows)} theme(s); "
+                  f"{db.query(Question).filter(Question.theme.is_(None)).count()} "
+                  f"row(s) have none")
+            return
+
         q = db.query(Question)
         if args.tache:
             q = q.filter(Question.tache == args.tache)
@@ -63,6 +86,8 @@ def main() -> None:
         # newest first: period is "YYYY-MM" so it sorts chronologically as text
         if args.source:
             q = q.filter(Question.source == args.source)
+        if args.theme:
+            q = q.filter(Question.theme.in_(args.theme))
         q = q.order_by(Question.period.desc(), Question.id.desc())
         if args.limit:
             q = q.limit(args.limit)
@@ -78,6 +103,10 @@ def main() -> None:
         bits.append(f"no_{args.unlabelled}")
     if args.source:
         bits.append(f"{args.source}")
+    if args.theme:
+        # one theme names itself; several would make an unreadable filename
+        bits.append(re.sub(r"[^A-Za-z0-9]+", "-", args.theme[0]).strip("-").lower()
+                    if len(args.theme) == 1 else f"{len(args.theme)}themes")
     out = args.output or Path(f"questions_{'_'.join(bits)}.jsonl")
     with out.open("w", encoding="utf-8") as fh:
         for r in rows:
