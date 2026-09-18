@@ -23,7 +23,8 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import CoreSubject, Fingerprint, ListQuestion, Theme
-from ..schemas import QuestionOut, QuestionPage
+from ..schemas import (FrequentOut, FrequentSubject, FrequentTheme,
+                       QuestionOut, QuestionPage, SubjectQuestion)
 
 router = APIRouter(prefix="/api/questions", tags=["questions"])
 
@@ -74,6 +75,7 @@ def list_questions(
     tache: int = Query(..., ge=2, le=3, description="2 or 3"),
     q: Optional[str] = Query(None, description="substring match on the text"),
     theme: Optional[str] = None,
+    core_subject: Optional[str] = None,
     year: Optional[int] = None,
     period: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}$"),
     sort: str = Query("date_desc"),
@@ -89,6 +91,8 @@ def list_questions(
         where.append(Fingerprint.text.ilike(f"%{q}%"))
     if theme:
         where.append(Theme.name == theme)
+    if core_subject:
+        where.append(CoreSubject.name == core_subject)
     if year:
         # period is "YYYY-MM", so a year is a prefix match - cheaper than
         # storing year separately and keeping the two in step
@@ -102,6 +106,7 @@ def list_questions(
         select(func.count()).select_from(ListQuestion)
         .join(Fingerprint, Fingerprint.id == ListQuestion.f_id)
         .outerjoin(Theme, Theme.id == Fingerprint.theme_id)
+        .outerjoin(CoreSubject, CoreSubject.id == Fingerprint.core_subject_id)
         .where(*where)) or 0
 
     rows = db.execute(
@@ -168,6 +173,74 @@ def questions_meta(
         "themes": themes,
         "sorts": sorted(SORTS),
     }
+
+
+@router.get("/frequent", response_model=FrequentOut)
+def frequent_subjects(
+    tache: int = Query(..., ge=2, le=3),
+    min_questions: int = Query(2, ge=1,
+                               description="only subjects with at least this "
+                                           "many distinct questions"),
+    db: Session = Depends(get_db),
+) -> FrequentOut:
+    """The high-frequency set: themes, their core subjects, one question each.
+
+    Grouped in Python rather than SQL. The input is one row per labelled
+    fingerprint - 544 for Task 2 - so the aggregation is trivial, and doing it
+    here keeps "which question represents this subject" as three readable
+    lines instead of a window function.
+
+    Only labelled questions can appear. Task 2 has a core subject on 36% of its
+    fingerprints and Task 3 on none, which is why `labelled` and `total` come
+    back with the data: the page has to say what it is not showing.
+    """
+    rows = db.execute(
+        select(Theme.name.label("theme"), CoreSubject.name.label("core_subject"),
+               Fingerprint.id, Fingerprint.text, Fingerprint.total_sightings,
+               Fingerprint.months_seen, Fingerprint.last_seen)
+        .join(Fingerprint, Fingerprint.core_subject_id == CoreSubject.id)
+        .join(Theme, Theme.id == CoreSubject.theme_id)
+        .where(Fingerprint.tache == tache)).all()
+
+    total = db.scalar(select(func.count()).select_from(Fingerprint)
+                      .where(Fingerprint.tache == tache)) or 0
+
+    by_subject: dict[tuple[str, str], list] = {}
+    for r in rows:
+        by_subject.setdefault((r.theme, r.core_subject), []).append(r)
+
+    by_theme: dict[str, list[FrequentSubject]] = {}
+    for (theme, subject), members in by_subject.items():
+        if len(members) < min_questions:
+            continue
+        # most-sighted first, most recent breaking a tie, so questions[0] is
+        # the representative - "the first one" by insertion order means nothing
+        members.sort(key=lambda m: (-m.total_sightings, m.last_seen or "", m.id))
+        by_theme.setdefault(theme, []).append(FrequentSubject(
+            core_subject=subject,
+            question_count=len(members),
+            total_sightings=sum(m.total_sightings for m in members),
+            questions=[SubjectQuestion(f_id=m.id, text=m.text,
+                                       total_sightings=m.total_sightings,
+                                       months_seen=m.months_seen,
+                                       last_seen=m.last_seen)
+                       for m in members],
+            f_id=members[0].id,
+        ))
+
+    themes = [
+        FrequentTheme(
+            theme=name,
+            question_count=sum(s.question_count for s in subjects),
+            total_sightings=sum(s.total_sightings for s in subjects),
+            subjects=sorted(subjects, key=lambda s: (-s.total_sightings,
+                                                     -s.question_count,
+                                                     s.core_subject)),
+        )
+        for name, subjects in by_theme.items()
+    ]
+    themes.sort(key=lambda t: (-t.total_sightings, t.theme))
+    return FrequentOut(themes=themes, labelled=len(rows), total=total)
 
 
 @router.get("/{question_id}", response_model=QuestionOut)

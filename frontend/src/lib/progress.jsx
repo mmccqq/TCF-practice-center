@@ -4,6 +4,40 @@ import {
 } from './api'
 import { useAuth } from './auth'
 
+/**
+ * A done/total bar.
+ *
+ * `compact` is the inline version that fits in a section heading; the default
+ * is the wider one for a page header. Renders nothing at total 0 rather than a
+ * divide-by-zero or an empty bar implying there is something to do.
+ */
+export function ProgressBar({ done, total, compact = false, label }) {
+  if (!total) return null
+  const pct = Math.round((done / total) * 100)
+  return (
+    <span className={`flex items-center gap-2 ${compact ? 'text-xs' : 'text-sm'}`}>
+      <span
+        role="progressbar"
+        aria-valuenow={done}
+        aria-valuemin={0}
+        aria-valuemax={total}
+        aria-label={label || `${done} of ${total} practised`}
+        className={`overflow-hidden rounded-full bg-slate-200 ${
+          compact ? 'h-1.5 w-20' : 'h-2 w-40'
+        }`}
+      >
+        <span
+          className="block h-full rounded-full bg-emerald-500 transition-all"
+          style={{ width: `${pct}%` }}
+        />
+      </span>
+      <span className={done === total ? 'font-medium text-emerald-700' : 'text-slate-500'}>
+        {done}/{total}
+      </span>
+    </span>
+  )
+}
+
 export function CheckIcon({ done }) {
   return (
     <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none"

@@ -57,6 +57,9 @@ export const removeBookmark = (fId) =>
 export const listBookmarks = (params) =>
   api(`/api/bookmarks?${new URLSearchParams(params)}`, { auth: true })
 
+export const frequentSubjects = (params) =>
+  api(`/api/questions/frequent?${new URLSearchParams(params)}`)
+
 export const questionsMeta = (params) =>
   api('/api/questions/meta' + (params ? `?${new URLSearchParams(params)}` : ''))
 export const googleConfig = () => api('/api/auth/google/config')

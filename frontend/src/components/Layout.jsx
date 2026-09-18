@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 
 const TOOLS = [
+  { to: '/tools/frequent', label: 'High-frequency subjects' },
   { to: '/tools/bookmarks', label: 'Oral bookmarks' },
 ]
 

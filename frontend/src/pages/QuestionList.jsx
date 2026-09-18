@@ -36,6 +36,8 @@ export default function QuestionList({ tache }) {
   const [params, setParams] = useSearchParams()
   const urlQ = params.get('q') || ''
   const theme = params.get('theme') || ''
+  // set by the high-frequency page's "+N more" links
+  const coreSubject = params.get('core_subject') || ''
 
   // local state so typing does not fire a request per keystroke
   const [draft, setDraft] = useState(urlQ)
@@ -62,6 +64,7 @@ export default function QuestionList({ tache }) {
   const query = { tache, per_page: PER_PAGE, sort: SORT }
   if (urlQ) query.q = urlQ
   if (theme) query.theme = theme
+  if (coreSubject) query.core_subject = coreSubject
 
   const {
     data, isPending, isError, error, isFetching,
@@ -107,6 +110,14 @@ export default function QuestionList({ tache }) {
             ? 'You ask the questions: gather information in an everyday situation.'
             : 'You give an opinion and justify it on a general topic.'}
         </p>
+        <Link
+          to={`/tools/frequent?tache=${tache}`}
+          className="mt-2 inline-flex items-center gap-1 text-sm font-medium
+                     text-sky-700 hover:underline"
+        >
+          High-frequency subjects
+          <span aria-hidden="true">&rarr;</span>
+        </Link>
       </div>
 
       <form
@@ -143,6 +154,22 @@ export default function QuestionList({ tache }) {
           </select>
         )}
       </form>
+
+      {coreSubject && (
+        <p className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+          Showing one core subject:
+          <span className="rounded bg-violet-100 px-1.5 py-0.5 text-xs text-violet-800">
+            {coreSubject}
+          </span>
+          <button
+            type="button"
+            onClick={() => update({ core_subject: '' })}
+            className="text-xs text-sky-700 hover:underline"
+          >
+            clear
+          </button>
+        </p>
+      )}
 
       {isError && (
         <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">

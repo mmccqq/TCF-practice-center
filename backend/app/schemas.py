@@ -72,6 +72,55 @@ class QuestionOut(BaseModel):
     last_seen: Optional[str] = None
 
 
+class SubjectQuestion(BaseModel):
+    """One question inside a core subject."""
+
+    f_id: int
+    text: str
+    total_sightings: int
+    months_seen: int
+    last_seen: Optional[str] = None
+
+
+class FrequentSubject(BaseModel):
+    """One core subject on the high-frequency page.
+
+    `question_count` and `total_sightings` measure different things and both
+    matter: five distinct questions asked once each is a broad subject, one
+    question asked five times is a repeated one. The page ranks on sightings
+    and shows the count.
+
+    Every question comes down with the subject rather than being fetched when
+    the card is expanded. All of Task 2 is 31 KB gzipped against 7 KB without,
+    which buys instant expansion and no loading state on a page the user
+    deliberately opened.
+    """
+
+    core_subject: str
+    question_count: int
+    total_sightings: int
+    # most-sighted first, so questions[0] is the representative
+    questions: List[SubjectQuestion]
+    # that representative's id, named explicitly because it is what progress is
+    # counted on: a subject is done when this question is practised, so the bar
+    # measures exactly the cards on screen
+    f_id: int
+
+
+class FrequentTheme(BaseModel):
+    theme: str
+    question_count: int
+    total_sightings: int
+    subjects: List[FrequentSubject]
+
+
+class FrequentOut(BaseModel):
+    themes: List[FrequentTheme]
+    # what the page is drawn from, so the UI can be honest about coverage
+    labelled: int
+    total: int
+
+
 class ProgressOut(BaseModel):
     """What one user has touched, as two id lists.
 
