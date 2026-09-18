@@ -123,6 +123,13 @@ def main() -> None:
         print("   ", p.relative_to(PROJECT) if p.is_absolute() else p)
 
     records = collect(paths)
+    # create_all here is a convenience for a throwaway local database: seeding
+    # a fresh sqlite file should not require an Alembic run first. It is NOT a
+    # substitute for migrations - it records nothing in alembic_version, so
+    # against a real database it can create tables behind Alembic's back and
+    # make the next `upgrade head` fail with DuplicateTable. Which is why the
+    # app itself no longer calls it (see app/main.py). Point seed.py at
+    # production only when that database is already at head.
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
         if args.reset:

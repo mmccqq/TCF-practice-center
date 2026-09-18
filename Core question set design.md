@@ -1,8 +1,9 @@
 # Core question set — design
 
-Status: step 1 implemented 2026-09-18 (tables created, Task 2 vocabulary
-loaded, revision `e0dd5c5a1c06`); steps 2-6 outstanding. Rewritten
-2026-09-18, replacing the 2026-09-04 draft.
+Status: steps 1-3 implemented 2026-09-18 — all four tables created and
+backfilled locally (revisions `e0dd5c5a1c06`, `dbbf7179181c`); steps 4-6
+outstanding, and Neon has the step-1 schema only. Rewritten 2026-09-18,
+replacing the 2026-09-04 draft.
 
 The product goal: a bounded set of questions a user can work through and, on
 finishing, feel prepared. This document defines the data model that makes such
@@ -164,7 +165,8 @@ and no foreign key anywhere else moves. See §8.
 
 Wholly derivable from layers 1 and 2: group `raw_questions` by
 `(tache, period, f_id)`. It is materialised rather than a view so the list
-page's pagination and ordering stay cheap.
+page's pagination and ordering stay cheap. `ix_list_questions_tache_period`
+is the index the list page reads it through.
 
 The unique constraint is the design: the database itself guarantees one row
 per question per month, rather than `seed.py` remembering to.
@@ -172,7 +174,9 @@ per question per month, rather than `seed.py` remembering to.
 `id` must be **deterministic** — either the natural key `(tache, period,
 f_id)` used directly, or a surrogate with the unique constraint above so a
 rebuild is an upsert. A serial allocated at build time would hand the same
-logical row a different id on every rebuild, breaking bookmarks.
+logical row a different id on every rebuild, breaking bookmarks. Implemented
+as the surrogate; a full re-run of `backfill_questions.py` was verified to
+change **0** of the 6,646 ids.
 
 ### `themes` and `core_subjects` — the controlled vocabulary, enforced
 
@@ -328,10 +332,16 @@ additive and reversible; the first user-visible change is step 4.
    enforcement turned on in `app/db.py`, without which the step-2 backfill
    would be tested against a database that ignores the constraints it relies
    on.
-2. Backfill `fingerprints` and `raw_questions` from the scraper JSONL.
-   Verify: 8,128 raw and 2,751 fingerprints (1,512 Task 2, 1,239 Task 3).
-3. Create and backfill `list_questions`. Verify 6,646 rows, and that every
-   current `questions` row maps to exactly one of them.
+2. **Done 2026-09-18.** Backfill `fingerprints` and `raw_questions` from the
+   scraper JSONL with `backfill_questions.py`. Landed on 8,128 raw and 2,751
+   fingerprints (1,512 Task 2, 1,239 Task 3).
+3. **Done 2026-09-18.** Create `list_questions` (revision `dbbf7179181c`) and
+   backfill it in the same pass. Landed on 6,646 rows (3,463 + 3,183). Of the
+   2,861 `questions` rows, 2,816 map to exactly one list row and none map to
+   more than one; the other 45 hold text that predates the scraper fixes (the
+   `→` marker and the multi-`<strong>` truncation) and so no longer hash to
+   anything the scrapers produce. 40 of those 45 are labelled, which the
+   label-transfer step has to account for.
 4. Point the API at `list_questions` joined to `fingerprints`. The site now
    serves per-month rows with consistent labels.
 5. Migrate `attempt.question_id` → `attempt.f_id`: add the column, dual-write,

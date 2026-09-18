@@ -27,9 +27,15 @@ Idempotent: rows are matched on name (themes) and on (theme, name)
 (core_subjects), so re-running after editing VOCABULARY adds what is new and
 leaves the rest alone.
 
-It never deletes. A label that disappears from VOCABULARY stays in the table,
-because fingerprints may already point at it; removing one is a deliberate act
-that has to deal with those rows first. Such labels are reported as `orphaned`.
+It never deletes unless you ask. A label that disappears from VOCABULARY stays
+in the table, because fingerprints may already point at it; such labels are
+reported as `orphaned`. `--prune` removes them, and refuses if anything still
+points at one - repoint those rows first.
+
+Pruning matters more than it looks: transfer_labels.py and load_labels.py look
+labels up case- and apostrophe-insensitively, so leaving both
+"Restaurant opening event" and "restaurant opening event" in the table makes
+that lookup ambiguous and one of them wins at random.
 """
 
 from __future__ import annotations
@@ -44,7 +50,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(PROJECT))
 
 from app.db import SessionLocal                        # noqa: E402
-from app.models import CoreSubject, Theme              # noqa: E402
+from app.models import CoreSubject, Fingerprint, Theme  # noqa: E402
 
 try:
     from questions_processing.llm_tasks import VOCABULARY   # noqa: E402
@@ -62,6 +68,9 @@ def main() -> None:
                     help="which task's vocabulary and tables (default 2)")
     ap.add_argument("--dry-run", action="store_true",
                     help="report what would change, write nothing")
+    ap.add_argument("--prune", action="store_true",
+                    help="delete labels the vocabulary no longer lists. Refuses "
+                         "if a fingerprint still points at one")
     args = ap.parse_args()
 
     if args.tache not in VOCABULARIES:
@@ -121,6 +130,31 @@ def main() -> None:
             print(f"\n! {len(orphaned)} label(s) in the table are not in the vocabulary:")
             for n in orphaned:
                 print(f"    {n}")
+            if args.prune:
+                # check every candidate before deleting any, so the run is
+                # all-or-nothing and the report cannot claim a deletion that a
+                # later rollback undid
+                doomed, stuck = [], []
+                for cs in db.query(CoreSubject).filter(
+                        CoreSubject.theme_id.in_(ours)).all():
+                    if cs.name in wanted.get(by_id[cs.theme_id], []):
+                        continue
+                    users = db.query(Fingerprint).filter(
+                        Fingerprint.core_subject_id == cs.id).count()
+                    (stuck if users else doomed).append(
+                        (cs, f"{by_id[cs.theme_id]} / {cs.name}", users))
+                if stuck:
+                    db.rollback()
+                    sys.exit("\n! refusing to prune - still in use:\n    "
+                             + "\n    ".join(f"{n}  ({u} fingerprint(s))"
+                                              for _, n, u in stuck)
+                             + "\n  repoint those fingerprints first, then re-run")
+                for cs, _, _ in doomed:
+                    db.delete(cs)
+                print(f"  {'would prune' if args.dry_run else 'pruned'} {len(doomed)}")
+            else:
+                print("  pass --prune to delete them (see the note about "
+                      "ambiguous lookups in --help)")
 
         if args.dry_run:
             db.rollback()

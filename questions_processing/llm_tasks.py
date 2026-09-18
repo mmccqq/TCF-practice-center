@@ -269,13 +269,16 @@ VOCABULARY: dict[str, list[str]] = {
         "artistic activity",
         "bookshop game",
         "concert",
+        "show",
+        "zoo",
+        "cultural festival",
     ],
     "Education & courses": [
         "lessons",
         "university course",
         "community lessons",
         "language stays",
-        "Continuing studies",
+        "continuing studies",
     ],
     "Food & dining": [
         "restaurant",
@@ -300,6 +303,7 @@ VOCABULARY: dict[str, list[str]] = {
     ],
     "Immigration & settling in": [
         "settling experience",
+        "settling in Canada",
     ],
     "Media & reading": [
         "films",
@@ -313,6 +317,8 @@ VOCABULARY: dict[str, list[str]] = {
         "smartphone",
         "grocery delivery",
         "shopping options",
+        "furniture delivery",
+        "used car",
     ],
     "Social life & event": [
         "meeting new people",
@@ -323,7 +329,9 @@ VOCABULARY: dict[str, list[str]] = {
         "gardening activities",
         "retirement party",
         "outings plateform",
-        "Restaurant opening event",
+        "restaurant opening event",
+        "promotion party",
+        "team dinner",
     ],
     "Sports & fitness": [
         "sport club",
@@ -343,9 +351,10 @@ VOCABULARY: dict[str, list[str]] = {
         "delivery",
         "change work",
         "airport pickup",
-        "Personal shop",
-        "After-school childcare employment",
+        "personal shop",
+        "after-school childcare employment",
         "house-sitting",
+        "company organization",
     ],
     "Transport & mobility": [
         "public transport",
@@ -354,6 +363,7 @@ VOCABULARY: dict[str, list[str]] = {
         "commuting by bike",
         "air travel",
         "car rental",
+        "roadside assistance",
     ],
     "Travel & tourism": [
         "holiday trip",
@@ -370,12 +380,17 @@ VOCABULARY: dict[str, list[str]] = {
         "seaside holiday",
         "favorite city",
         "excursion",
-        "child’s vacation",
+        "child's vacation",
         "accommodation options",
     ],
     "Volunteering & associations": [
-        "Volunteering & associations",
-    ],}
+        "local associations",
+        "animal protection association",
+        "food aid association",
+        "elderly support association",
+        "environmental association",
+    ],
+}
 
 
 RULES_CORE_SUBJECT = """\

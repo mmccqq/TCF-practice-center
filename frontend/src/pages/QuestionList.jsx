@@ -151,8 +151,11 @@ export default function QuestionList({ tache }) {
       ) : data ? (
         <>
           <p className="text-sm text-slate-500">
+            {/* "monthly entries", not "questions": a question asked in eight
+                months is eight rows here. The home page advertises distinct
+                questions (meta.counts), which is a smaller number. */}
             Showing {items.length.toLocaleString()} of {total.toLocaleString()}{' '}
-            question{total === 1 ? '' : 's'}
+            monthly entr{total === 1 ? 'y' : 'ies'}
             {isFetching && !isFetchingNextPage && (
               <span className="ml-2 text-slate-400">updating…</span>
             )}
@@ -173,7 +176,8 @@ export default function QuestionList({ tache }) {
                 <ol className="mt-3 space-y-3">
                   {group.map((q) => (
                     <li key={q.id} className="rounded-lg border border-slate-200 bg-white p-4">
-                      {(q.theme || q.core_subject || q.occurrences > 1) && (
+                      {(q.theme || q.core_subject || q.month_sightings > 1
+                        || q.months_seen > 1) && (
                         <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
                           {q.theme && (
                             <span className="rounded bg-sky-100 px-1.5 py-0.5 font-medium text-sky-800">
@@ -185,9 +189,18 @@ export default function QuestionList({ tache }) {
                               {q.core_subject}
                             </span>
                           )}
-                          {q.occurrences > 1 && (
+                          {/* two different numbers: how often it came up in
+                              THIS month, and how many months it has appeared
+                              in overall. The second one is the useful signal
+                              and the old single table could not express it. */}
+                          {q.month_sightings > 1 && (
                             <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800">
-                              seen {q.occurrences}&times;
+                              {q.month_sightings}&times; this month
+                            </span>
+                          )}
+                          {q.months_seen > 1 && (
+                            <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-800">
+                              asked in {q.months_seen} months
                             </span>
                           )}
                         </div>

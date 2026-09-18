@@ -9,7 +9,6 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
-from .db import Base, engine
 from .routers import auth as auth_router
 from .routers import questions as questions_router
 
@@ -18,9 +17,17 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Phase 0 creates tables directly. Alembic is in requirements for when the
-    # schema starts changing under real data (phase 2 onwards).
-    Base.metadata.create_all(bind=engine)
+    # Deliberately does NOT call Base.metadata.create_all().
+    #
+    # Alembic owns the schema now. create_all() creates every table the models
+    # declare and records nothing in alembic_version, so starting the app once
+    # against a database was enough to build the tables behind Alembic's back
+    # and make the next `upgrade head` fail with DuplicateTable - which is
+    # exactly what happened to Neon on 2026-09-18.
+    #
+    # Consequence: a new database needs `alembic upgrade head` before the app
+    # will work. That is the intended order, and the same command production
+    # already runs.
     yield
 
 

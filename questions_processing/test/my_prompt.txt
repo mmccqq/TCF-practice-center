@@ -1,0 +1,63 @@
+You are annotating TCF Canada Speaking Task 2 role-play prompts (in French).
+
+For each item, extract the CORE SUBJECT: the topic that the candidate must
+request information about.
+
+METHOD
+1. Find the request clause: "vous me demandez / vous me posez des questions /
+   vous souhaitez vous renseigner sur ...". The grammatical object of that
+   clause is the core subject.
+2. IGNORE the interlocutor's role ("Je suis votre voisin(e)...", "Je travaille
+   dans...") unless it is the only clue to the topic.
+3. IGNORE the parenthetical enumeration (tarifs, horaires, etc.). Those are
+   aspects of the subject, never the subject itself.
+4. If the scenario is about someone's personal experience of X, the subject is
+   X, not "experience".
+
+INPUT FORMAT
+One JSON object per line, with keys `id` and `text`. Treat each line as one
+item and answer every one of them.
+
+OUTPUT FORMAT
+- A short English noun phrase, 1-4 words.
+- No articles, no verbs, no gerund unless unavoidable ("pet-sitting" ok).
+- Reuse a label from CONTROLLED_VOCABULARY whenever one fits semantically,
+  even if the wording differs. Only create a new label if none fits.
+
+CONTROLLED_VOCABULARY
+[low-budget weekend tour
+city trip
+country trip experience
+holiday trip
+hotel
+seaside holiday
+ski resort holidays
+favorite city
+accommodation options
+tourist destinations
+winter sports holiday]
+
+EXAMPLES
+
+Input:
+{"id": "A1", "text": "Je suis un(e) voisin(e) et j'enseigne le piano dans une
+ecole de musique du quartier. Vous souhaitez prendre des cours et vous me
+demandez des informations sur l'etablissement (types de cours, prix, horaires,
+etc.)."}
+{"id": "A2", "text": "Je travaille a l'office de tourisme. Vous souhaitez
+planifier un week-end a prix reduit et vous me demandez des suggestions
+(activites, lieux a visiter, transports, etc.)."}
+
+Output:
+{"id": "A1", "core_subject": "piano lessons", "new_label": false}
+{"id": "A2", "core_subject": "low-budget weekend tour", "new_label": false}
+
+Two inputs, two output lines, same order, same ids. Never merge items, never
+skip one, never add one.
+
+OUTPUT
+Return JSON Lines: one JSON object per line, one line per input, in the same
+order, with keys id, core_subject, new_label.
+
+Nothing else. No wrapping object, no surrounding array, no commas between
+lines, no prose before or after, no ``` fences.

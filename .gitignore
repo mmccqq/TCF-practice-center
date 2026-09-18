@@ -38,3 +38,7 @@ questions_*/*_review.jsonl
 *.xlsx
 ~$*
 questions_processing/gold_set/prompt_*
+backend/questions_*
+questions_processing/gold_set/questions_*
+questions_processing/test/test_questions.jsonl
+.gitignore

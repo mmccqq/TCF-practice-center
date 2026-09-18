@@ -222,6 +222,48 @@ class RawQuestion(Base):
     )
 
 
+class ListQuestion(Base):
+    """One question per month - what the list page renders.
+
+    Wholly derivable from raw_questions and fingerprints: group the raw rows by
+    (tache, period, f_id). Materialised rather than a view so the list page's
+    pagination and ordering stay cheap.
+
+    This is the layer that fixes the orphan bug. Under the old single-table
+    model a recurring question's canonical id moved to the newest month and the
+    previous row was left behind, unlabelled; here a repeat is simply a second
+    row in a second month, and both point at the same fingerprint, so they
+    cannot disagree about their labels.
+    """
+
+    __tablename__ = "list_questions"
+
+    # a surrogate, but the unique constraint below is what gives it meaning: a
+    # rebuild matches on (tache, period, f_id) and upserts, so the same logical
+    # row keeps the same id. A serial allocated fresh on every rebuild would
+    # hand out new ids and break every bookmark pointing at one.
+    id: Mapped[int] = mapped_column(primary_key=True)
+    f_id: Mapped[int] = mapped_column(ForeignKey("fingerprints.id"), index=True)
+    tache: Mapped[int] = mapped_column(Integer, index=True)
+    period: Mapped[str] = mapped_column(String(7), index=True)
+    # how many raw rows in *this* month collapsed here. Not the same number as
+    # fingerprints.total_sightings, which counts every month - hence the
+    # different name, so neither can be mistaken for the other.
+    month_sightings: Mapped[int] = mapped_column(Integer, default=1)
+    representative_raw_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("raw_questions.id"), nullable=True)
+
+    fingerprint: Mapped["Fingerprint"] = relationship()
+
+    __table_args__ = (
+        # the database guarantees one row per question per month, rather than
+        # the backfill remembering to
+        UniqueConstraint("tache", "period", "f_id", name="uq_list_question_tache_period_f"),
+        # how the list page reads it: one task, newest month first
+        Index("ix_list_questions_tache_period", "tache", "period"),
+    )
+
+
 class Attempt(Base):
     """Phase 2 progress tracking. Created now so the schema does not need a
     breaking migration later; unused by the phase 0 UI."""

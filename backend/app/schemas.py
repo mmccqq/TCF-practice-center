@@ -27,28 +27,48 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class QuestionOut(BaseModel):
-    # built from a SQLAlchemy Question row, so Pydantic has to read attributes
-    # (row.id) instead of its default dict lookup (row["id"]); without this the
-    # conversion raises ValidationError on every request. Pydantic v1 spelled it
-    # `class Config: orm_mode = True`.
+    """One question as it appears in a month.
+
+    Assembled from a `list_questions` row joined to its fingerprint, theme and
+    core subject - see routers/questions.py. The router builds a dict rather
+    than handing over an ORM row, because no single table holds all of this.
+
+    Two ids, deliberately:
+
+      id     the list_questions row - unique per (task, month, question), and
+             what the list page keys on
+      f_id   the fingerprint - the question's identity, the same value for
+             every month it recurs in. Progress, bookmarks and notes hang off
+             this one, so that practising a question in September marks it
+             practised everywhere.
+
+    `source` is absent on purpose. It lives on raw_questions and means "who
+    reported this sighting", which is provenance for the pipeline and not
+    something a user should see or filter by.
+    """
+
     model_config = ConfigDict(from_attributes=True)
 
-    id: str
+    id: int
+    f_id: int
     tache: int
     text: str
-    source: str
+    period: str
     year: int
     month: int
-    period: str
-    partie: Optional[int] = None
-    sujet: Optional[int] = None
-    source_url: Optional[str] = None
-    occurrences: int
-    # nullable because labelling lags scraping (see models.Question): a question
-    # exists as soon as it is scraped and acquires these only when a labelling
-    # run covers it, so the UI has to handle a question with neither.
+    # nullable because labelling lags scraping: a question exists as soon as it
+    # is scraped and acquires these only when a labelling run covers it, so the
+    # UI has to handle a question with neither.
     theme: Optional[str] = None
+    abstract: Optional[str] = None
     core_subject: Optional[str] = None
+    # two different counts, never conflated (see the design doc): sightings in
+    # THIS month, versus the question's whole history
+    month_sightings: int
+    total_sightings: int
+    months_seen: int
+    first_seen: Optional[str] = None
+    last_seen: Optional[str] = None
 
 
 class QuestionPage(BaseModel):

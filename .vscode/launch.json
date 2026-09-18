@@ -32,16 +32,13 @@
       }
     },
     {
-      "name": "abstract sync (gemini, failing case)",
+      "name": "deduplication",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/questions_processing/abstract.py",
+      "program": "${workspaceFolder}/questions_processing/deduplication.py",
       "args": [
-        "sync",
-        "questions_reussir/tache2_no_semantic.jsonl",
-        "-p", "gemini",
-        "--limit", "40",
-        "--chunk", "40"
+        "gold_set/tache2_gold.jsonl",
+        "--mode", "embed"
       ],
       "cwd": "${workspaceFolder}/questions_processing",
       "console": "integratedTerminal",
