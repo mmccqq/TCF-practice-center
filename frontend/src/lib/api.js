@@ -41,7 +41,9 @@ export async function api(path, { method = 'GET', body, auth = false } = {}) {
 export const listQuestions = (params) =>
   api(`/api/questions?${new URLSearchParams(params)}`)
 
-export const questionsMeta = () => api('/api/questions/meta')
+// params is optional: {tache} scopes the filter options to one task
+export const questionsMeta = (params) =>
+  api('/api/questions/meta' + (params ? `?${new URLSearchParams(params)}` : ''))
 export const googleConfig = () => api('/api/auth/google/config')
 export const signup = (body) => api('/api/auth/signup', { method: 'POST', body })
 export const login = (body) => api('/api/auth/login', { method: 'POST', body })

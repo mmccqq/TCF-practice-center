@@ -44,6 +44,11 @@ class QuestionOut(BaseModel):
     sujet: Optional[int] = None
     source_url: Optional[str] = None
     occurrences: int
+    # nullable because labelling lags scraping (see models.Question): a question
+    # exists as soon as it is scraped and acquires these only when a labelling
+    # run covers it, so the UI has to handle a question with neither.
+    theme: Optional[str] = None
+    core_subject: Optional[str] = None
 
 
 class QuestionPage(BaseModel):
