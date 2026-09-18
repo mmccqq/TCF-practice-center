@@ -1,6 +1,47 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { questionsMeta } from '../lib/api'
+import { coreSetProgress, questionsMeta } from '../lib/api'
+import { useAuth } from '../lib/auth'
+import { ProgressBar } from '../lib/progress'
+
+/** The flagship card. Full width and above the task grid, because working
+ *  through the core set is the recommended path, not one option among three. */
+function CoreSetCard({ progress }) {
+  const done = progress?.done ?? 0
+  const total = progress?.total ?? 0
+  return (
+    <Link
+      to="/core-set"
+      className="block rounded-xl border-2 border-sky-500 bg-white p-5 transition
+                 hover:border-sky-600 hover:shadow-md"
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-lg font-semibold">Core set</h3>
+        <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800">
+          Start here
+        </span>
+      </div>
+      <p className="mt-1 max-w-xl text-sm text-slate-600">
+        The subjects the exam keeps coming back to, ranked by how often they have
+        actually been asked. Work through these and you have covered what really
+        gets tested — instead of scrolling a thousand questions in date order.
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        {total > 0 ? (
+          <>
+            <ProgressBar done={done} total={total}
+                         label={`${done} of ${total} core subjects practised`} />
+            <span className="text-sm font-medium text-sky-700">
+              {done > 0 ? 'Continue' : 'Start'} &rarr;
+            </span>
+          </>
+        ) : (
+          <span className="text-sm font-medium text-sky-700">Open the core set &rarr;</span>
+        )}
+      </div>
+    </Link>
+  )
+}
 
 function SectionCard({ title, subtitle, count, to, disabled }) {
   const body = (
@@ -40,8 +81,17 @@ function SectionCard({ title, subtitle, count, to, disabled }) {
 }
 
 export default function Home() {
+  const { user } = useAuth()
   const { data } = useQuery({ queryKey: ['meta'], queryFn: questionsMeta })
   const counts = data?.counts
+
+  // a small dedicated endpoint, not the core set itself: this is one line of
+  // text and the full set is 27 KB gzipped
+  const { data: progress } = useQuery({
+    queryKey: ['core-progress', 2],
+    queryFn: () => coreSetProgress({ tache: 2 }),
+    enabled: !!user,
+  })
 
   return (
     <div className="space-y-10">
@@ -56,13 +106,20 @@ export default function Home() {
         </p>
         <p className="mt-2 max-w-2xl text-sm text-slate-500">
           Speaking Tasks 2 and 3 carry the most preparation value, so coverage there is
-          deepest. Themes, high-frequency banks, model answers and flashcards are on the way.
+          deepest. Model answers and flashcards are on the way.
         </p>
       </section>
 
       <section>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
-          Expression orale &mdash; available now
+          Recommended
+        </h2>
+        <CoreSetCard progress={progress} />
+      </section>
+
+      <section>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
+          Browse everything
         </h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <SectionCard

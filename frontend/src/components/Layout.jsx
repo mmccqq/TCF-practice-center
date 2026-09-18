@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
-import { useAuth } from '../lib/auth'
+import { loginHref, useAuth } from '../lib/auth'
 
 const TOOLS = [
-  { to: '/tools/frequent', label: 'High-frequency subjects' },
   { to: '/tools/bookmarks', label: 'Oral bookmarks' },
 ]
 
@@ -81,6 +80,7 @@ function NavItem({ to, children }) {
 
 export default function Layout() {
   const { user, signOut } = useAuth()
+  const location = useLocation()
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <header className="border-b border-slate-200 bg-white">
@@ -89,6 +89,9 @@ export default function Layout() {
             TCF<span className="text-sky-600">·</span>Practice
           </Link>
           <nav className="flex items-center gap-1">
+            {/* first, and not inside Tools: this is the recommended path
+                through the bank, not a utility */}
+            <NavItem to="/core-set">Core&nbsp;set</NavItem>
             <NavItem to="/speaking/task2">Task&nbsp;2</NavItem>
             <NavItem to="/speaking/task3">Task&nbsp;3</NavItem>
             <ToolsMenu />
@@ -106,11 +109,11 @@ export default function Layout() {
               </>
             ) : (
               <>
-                <Link to="/login" className="rounded-md px-3 py-1.5 font-medium hover:bg-slate-100">
+                <Link to={loginHref(location)} className="rounded-md px-3 py-1.5 font-medium hover:bg-slate-100">
                   Log in
                 </Link>
                 <Link
-                  to="/signup"
+                  to={loginHref(location, '/signup')}
                   className="rounded-md bg-slate-900 px-3 py-1.5 font-medium text-white hover:bg-slate-800"
                 >
                   Sign up

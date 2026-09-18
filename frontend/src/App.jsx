@@ -14,7 +14,9 @@ export default function App() {
         <Route path="/speaking/task2" element={<QuestionList tache={2} />} />
         <Route path="/speaking/task3" element={<QuestionList tache={3} />} />
         <Route path="/tools/bookmarks" element={<Bookmarks />} />
-        <Route path="/tools/frequent" element={<Frequent />} />
+        <Route path="/core-set" element={<Frequent />} />
+        {/* the page lived under /tools before it was promoted */}
+        <Route path="/tools/frequent" element={<Navigate to="/core-set" replace />} />
         <Route path="/login" element={<AuthPage mode="login" />} />
         <Route path="/signup" element={<AuthPage mode="signup" />} />
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -175,15 +175,18 @@ def questions_meta(
     }
 
 
-@router.get("/frequent", response_model=FrequentOut)
-def frequent_subjects(
-    tache: int = Query(..., ge=2, le=3),
-    min_questions: int = Query(2, ge=1,
-                               description="only subjects with at least this "
-                                           "many distinct questions"),
-    db: Session = Depends(get_db),
-) -> FrequentOut:
-    """The high-frequency set: themes, their core subjects, one question each.
+# the default floor for "is this subject worth a card": below two distinct
+# questions a core subject is a one-off, not something the exam keeps asking
+MIN_QUESTIONS = 2
+
+
+def build_core_set(db: Session, tache: int,
+                   min_questions: int = MIN_QUESTIONS) -> tuple[list[FrequentTheme], int, int]:
+    """(themes, labelled, total) for one task.
+
+    Shared by the core-set page and the progress summary, so the two can never
+    disagree about which subjects are in the set or which question represents
+    one.
 
     Grouped in Python rather than SQL. The input is one row per labelled
     fingerprint - 544 for Task 2 - so the aggregation is trivial, and doing it
@@ -240,7 +243,20 @@ def frequent_subjects(
         for name, subjects in by_theme.items()
     ]
     themes.sort(key=lambda t: (-t.total_sightings, t.theme))
-    return FrequentOut(themes=themes, labelled=len(rows), total=total)
+    return themes, len(rows), total
+
+
+@router.get("/frequent", response_model=FrequentOut)
+def frequent_subjects(
+    tache: int = Query(..., ge=2, le=3),
+    min_questions: int = Query(MIN_QUESTIONS, ge=1,
+                               description="only subjects with at least this "
+                                           "many distinct questions"),
+    db: Session = Depends(get_db),
+) -> FrequentOut:
+    """The core set: themes, their core subjects, every question in each."""
+    themes, labelled, total = build_core_set(db, tache, min_questions)
+    return FrequentOut(themes=themes, labelled=labelled, total=total)
 
 
 @router.get("/{question_id}", response_model=QuestionOut)

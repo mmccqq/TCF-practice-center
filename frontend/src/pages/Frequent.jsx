@@ -1,13 +1,19 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { frequentSubjects } from '../lib/api'
+import { loginHref } from '../lib/auth'
 import { Marks, ProgressBar, useProgress } from '../lib/progress'
 
 const MIN_QUESTIONS = 2
 
+// stable, URL-safe id per theme, for the "next unfinished" jump
+const themeAnchor = (name) =>
+  'theme-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+
 export default function Frequent() {
   const [params, setParams] = useSearchParams()
+  const location = useLocation()
   // which cards are expanded, by core subject name. Local state rather than the
   // URL: it is a reading aid, not something worth linking to.
   const [open, setOpen] = useState(() => new Set())
@@ -36,6 +42,11 @@ export default function Frequent() {
     totalAll += t.subjects.length
   }
 
+  // the first theme with anything left in it, in the page's own order - so
+  // "continue" always lands on the highest-value unfinished work
+  const nextTheme = (data?.themes ?? []).find(
+    (t) => (themeProgress.get(t.theme)?.done ?? 0) < t.subjects.length)?.theme
+
   const toggleOpen = (name) => setOpen((prev) => {
     const next = new Set(prev)
     next.has(name) ? next.delete(name) : next.add(name)
@@ -51,9 +62,9 @@ export default function Frequent() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">High-frequency subjects</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Core set</h1>
         <p className="mt-1 max-w-2xl text-sm text-slate-600">
-          What the exam keeps asking about, grouped by theme. Each card is one core
+          The subjects the exam keeps coming back to, grouped by theme. Each card is one core
           subject with at least {MIN_QUESTIONS} distinct questions behind it, showing
           the most-asked of them. Ordered by how often the subject has actually come
           up. Tick a card to mark that subject done; finish every card in a theme and
@@ -110,17 +121,34 @@ export default function Frequent() {
                 {totalAll ? Math.round((doneAll / totalAll) * 100) : 0}% of the core
                 subjects
               </span>
+              {/* daily use means picking up where you stopped, not re-finding
+                  your place by scrolling past themes you have finished */}
+              {nextTheme ? (
+                <a
+                  href={`#${themeAnchor(nextTheme)}`}
+                  className="ml-auto rounded-md bg-sky-600 px-3 py-1.5 text-sm
+                             font-medium text-white transition hover:bg-sky-700"
+                >
+                  {doneAll > 0 ? 'Continue' : 'Start'} with {nextTheme} &rarr;
+                </a>
+              ) : (
+                <span className="ml-auto rounded-md bg-emerald-100 px-3 py-1.5 text-sm
+                                 font-medium text-emerald-800">
+                  All {totalAll} subjects done
+                </span>
+              )}
             </div>
           ) : (
             <p className="rounded-lg border border-dashed border-slate-300 p-3 text-sm text-slate-500">
-              <Link to="/login" className="font-medium text-sky-700 hover:underline">Sign in</Link>
+              <Link to={loginHref(location)} className="font-medium text-sky-700 hover:underline">Sign in</Link>
               {' '}to track which of these you have practised.
             </p>
           )}
 
           <div className="space-y-6">
             {data.themes.map((t) => (
-              <section key={t.theme}>
+              <section key={t.theme} id={themeAnchor(t.theme)}
+                       className="scroll-mt-12">
                 <h2 className="sticky top-0 z-10 flex items-baseline gap-2 border-b
                                border-slate-200 bg-slate-50/90 py-1.5 text-sm
                                font-semibold text-slate-700 backdrop-blur">

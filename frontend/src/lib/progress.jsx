@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import {
   addBookmark, getProgress, markPracticed, removeBookmark, unmarkPracticed,
 } from './api'
-import { useAuth } from './auth'
+import { loginHref, useAuth } from './auth'
 
 /**
  * A done/total bar.
@@ -92,6 +92,7 @@ export function Marks({ user, fId, practiced, bookmarked, togglePracticed,
   // a counter, not a boolean: the key restarts the animation when the same
   // button is clicked again before the previous burst has finished
   const [burst, setBurst] = useState(0)
+  const location = useLocation()
 
   useEffect(() => {
     if (!burst) return undefined
@@ -102,7 +103,7 @@ export function Marks({ user, fId, practiced, bookmarked, togglePracticed,
   if (!user) {
     return (
       <Link
-        to="/login"
+        to={loginHref(location)}
         title="Sign in to bookmark questions and track your progress"
         aria-label="Sign in to track your progress"
         className={`flex shrink-0 gap-1 rounded-full p-0.5 text-slate-200

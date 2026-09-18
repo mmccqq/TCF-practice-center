@@ -27,7 +27,8 @@ from sqlalchemy.orm import Session
 from ..auth import current_user
 from ..db import get_db
 from ..models import CoreSubject, Fingerprint, Theme, User, UserQuestion, utcnow
-from ..schemas import BookmarkOut, ProgressOut
+from ..schemas import BookmarkOut, CoreSetProgress, ProgressOut
+from .questions import build_core_set
 
 router = APIRouter(tags=["progress"])
 
@@ -86,6 +87,27 @@ def get_progress(
         practiced=[f for f, p, _ in rows if p],
         bookmarked=[f for f, _, b in rows if b],
     )
+
+
+@router.get("/api/progress/summary", response_model=CoreSetProgress)
+def core_set_progress(
+    tache: int = Query(2, ge=2, le=3),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> CoreSetProgress:
+    """How far through the core set this user is.
+
+    A separate endpoint from /api/progress so the home page and the task-page
+    banner can show the number without pulling the whole core set, which is
+    27 KB gzipped - worth it on the page that renders every card, wasteful for
+    a one-line "12 of 86".
+    """
+    themes, _, _ = build_core_set(db, tache)
+    reps = {s.f_id for t in themes for s in t.subjects}
+    practised = {f for (f,) in db.execute(
+        select(UserQuestion.f_id).where(UserQuestion.user_id == user.id,
+                                        UserQuestion.practiced.is_(True))).all()}
+    return CoreSetProgress(done=len(reps & practised), total=len(reps))
 
 
 @router.put("/api/attempts/{f_id}", status_code=status.HTTP_204_NO_CONTENT)

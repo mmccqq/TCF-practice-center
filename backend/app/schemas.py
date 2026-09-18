@@ -121,6 +121,13 @@ class FrequentOut(BaseModel):
     total: int
 
 
+class CoreSetProgress(BaseModel):
+    """Core subjects practised, out of the whole set."""
+
+    done: int
+    total: int
+
+
 class ProgressOut(BaseModel):
     """What one user has touched, as two id lists.
 

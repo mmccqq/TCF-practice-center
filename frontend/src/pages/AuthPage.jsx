@@ -2,7 +2,11 @@ import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { fetchMe, googleConfig, login, signup, tokenStore } from '../lib/api'
-import { useAuth } from '../lib/auth'
+import { loginHref, safeNext, useAuth } from '../lib/auth'
+
+// survives the Google round trip, which leaves the app and comes back through
+// the backend at /login#token=... with nothing of ours attached
+const NEXT_KEY = 'tcf.next'
 
 const OAUTH_ERRORS = {
   bad_state: 'Sign-in could not be verified. Please try again.',
@@ -27,6 +31,19 @@ export default function AuthPage({ mode }) {
 
   const { data: google } = useQuery({ queryKey: ['googleConfig'], queryFn: googleConfig })
 
+  // ?next= is written on arrival and read back after any successful sign-in,
+  // so local and Google flows land in the same place
+  const next = safeNext(new URLSearchParams(location.search).get('next'))
+  useEffect(() => {
+    if (next !== '/') sessionStorage.setItem(NEXT_KEY, next)
+  }, [next])
+
+  const consumeNext = () => {
+    const stored = safeNext(sessionStorage.getItem(NEXT_KEY))
+    sessionStorage.removeItem(NEXT_KEY)
+    return stored !== '/' ? stored : next
+  }
+
   // The Google callback redirects to /login#token=... - consume it, then strip
   // it from the URL so the credential is not left sitting in history.
   useEffect(() => {
@@ -43,7 +60,7 @@ export default function AuthPage({ mode }) {
     tokenStore.set(token)
     window.history.replaceState({}, '', location.pathname)
     fetchMe()
-      .then((u) => { setUser(u); navigate('/', { replace: true }) })
+      .then((u) => { setUser(u); navigate(consumeNext(), { replace: true }) })
       .catch(() => { tokenStore.clear(); setError('Could not complete Google sign-in.') })
   }, [location, navigate, setUser])
 
@@ -58,7 +75,7 @@ export default function AuthPage({ mode }) {
         : { email, password }
       const data = await fn(body)
       signIn(data.access_token, data.user)
-      navigate('/', { replace: true })
+      navigate(consumeNext(), { replace: true })
     } catch (err) {
       setError(err.message)
     } finally {
@@ -146,7 +163,11 @@ export default function AuthPage({ mode }) {
 
       <p className="mt-6 text-center text-sm text-slate-600">
         {isSignup ? 'Already have an account? ' : 'No account yet? '}
-        <Link to={isSignup ? '/login' : '/signup'} className="font-medium text-sky-700 hover:underline">
+        {/* carry ?next= across, so switching form does not lose the destination */}
+        <Link
+          to={loginHref({ pathname: next, search: '' }, isSignup ? '/login' : '/signup')}
+          className="font-medium text-sky-700 hover:underline"
+        >
           {isSignup ? 'Log in' : 'Sign up'}
         </Link>
       </p>

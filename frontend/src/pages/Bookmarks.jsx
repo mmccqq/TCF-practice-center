@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { listBookmarks } from '../lib/api'
+import { loginHref } from '../lib/auth'
 import { Marks, useProgress } from '../lib/progress'
 
 const TABS = [
@@ -20,6 +21,7 @@ function whenBookmarked(iso) {
 
 export default function Bookmarks() {
   const [tache, setTache] = useState(2)
+  const location = useLocation()
   const bookmarksKey = ['bookmarks', tache]
 
   // toggling a bookmark invalidates ['bookmarks'] from inside useProgress, so
@@ -38,7 +40,7 @@ export default function Bookmarks() {
       <div className="space-y-4">
         <h1 className="text-2xl font-bold tracking-tight">Oral bookmarks</h1>
         <p className="rounded-lg border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
-          <Link to="/login" className="font-medium text-sky-700 hover:underline">Sign in</Link>
+          <Link to={loginHref(location)} className="font-medium text-sky-700 hover:underline">Sign in</Link>
           {' '}to save questions and come back to them.
         </p>
       </div>

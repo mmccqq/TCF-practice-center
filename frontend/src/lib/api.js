@@ -54,6 +54,8 @@ export const addBookmark = (fId) =>
   api(`/api/bookmarks/${fId}`, { method: 'PUT', auth: true })
 export const removeBookmark = (fId) =>
   api(`/api/bookmarks/${fId}`, { method: 'DELETE', auth: true })
+export const coreSetProgress = (params) =>
+  api(`/api/progress/summary?${new URLSearchParams(params)}`, { auth: true })
 export const listBookmarks = (params) =>
   api(`/api/bookmarks?${new URLSearchParams(params)}`, { auth: true })
 

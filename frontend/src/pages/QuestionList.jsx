@@ -1,8 +1,8 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { listQuestions, questionsMeta } from '../lib/api'
-import { Marks, useProgress } from '../lib/progress'
+import { coreSetProgress, listQuestions, questionsMeta } from '../lib/api'
+import { Marks, ProgressBar, useProgress } from '../lib/progress'
 
 const PER_PAGE = 25
 
@@ -54,6 +54,12 @@ export default function QuestionList({ tache }) {
 
   const { user, practiced, bookmarked, togglePracticed, toggleBookmarked } =
     useProgress(tache)
+
+  const { data: coreProgress } = useQuery({
+    queryKey: ['core-progress', tache],
+    queryFn: () => coreSetProgress({ tache }),
+    enabled: !!user,
+  })
 
   // the theme list is per task: Task 2 and Task 3 do not share a vocabulary
   const { data: meta } = useQuery({
@@ -110,15 +116,28 @@ export default function QuestionList({ tache }) {
             ? 'You ask the questions: gather information in an everyday situation.'
             : 'You give an opinion and justify it on a general topic.'}
         </p>
-        <Link
-          to={`/tools/frequent?tache=${tache}`}
-          className="mt-2 inline-flex items-center gap-1 text-sm font-medium
-                     text-sky-700 hover:underline"
-        >
-          High-frequency subjects
-          <span aria-hidden="true">&rarr;</span>
-        </Link>
       </div>
+
+      {/* the recommended path out of this list. A banner rather than a text
+          link: this page is a thousand questions in date order, and most
+          people should be working the core set instead. */}
+      <Link
+        to={`/core-set?tache=${tache}`}
+        className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border-2
+                   border-sky-500 bg-white p-3 transition hover:border-sky-600
+                   hover:shadow-sm"
+      >
+        <span className="text-sm font-semibold">Core set</span>
+        <span className="min-w-0 flex-1 text-sm text-slate-600">
+          The subjects Task&nbsp;{tache} keeps coming back to, ranked by how often
+          they have been asked.
+        </span>
+        {coreProgress?.total > 0 && (
+          <ProgressBar done={coreProgress.done} total={coreProgress.total}
+                       label={`${coreProgress.done} of ${coreProgress.total} core subjects practised`} />
+        )}
+        <span className="text-sm font-medium text-sky-700" aria-hidden="true">&rarr;</span>
+      </Link>
 
       <form
         className="flex flex-wrap items-center gap-2"
