@@ -87,6 +87,10 @@ export default function QuestionList({ tache }) {
 
   const items = data ? data.pages.flatMap((p) => p.items) : []
   const total = data?.pages[0]?.total ?? 0
+  // how many each month really holds under the current filters. Counting the
+  // loaded rows instead would under-report every month that is still being
+  // scrolled into view.
+  const periodCounts = data?.pages[0]?.period_counts ?? {}
 
   // load the next page when the sentinel below the list comes into view
   const sentinel = useRef(null)
@@ -219,7 +223,10 @@ export default function QuestionList({ tache }) {
                                font-semibold text-slate-700 backdrop-blur">
                   {periodLabel(period)}
                   <span className="font-normal text-slate-400">
-                    {group.length} question{group.length === 1 ? '' : 's'}
+                    {/* the month's real size under the current filters, not the
+                        number scrolled into view so far */}
+                    {periodCounts[period] ?? group.length} question
+                    {(periodCounts[period] ?? group.length) === 1 ? '' : 's'}
                   </span>
                 </h2>
 

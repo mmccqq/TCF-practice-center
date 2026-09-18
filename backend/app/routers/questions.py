@@ -113,8 +113,19 @@ def list_questions(
         _select().where(*where).order_by(*SORTS[sort])
         .offset((page - 1) * per_page).limit(per_page)).all()
 
+    # one indexed GROUP BY over the filtered set - the same joins again, so a
+    # theme or search filter narrows these counts exactly as it narrows the rows
+    period_counts = dict(db.execute(
+        select(ListQuestion.period, func.count())
+        .select_from(ListQuestion)
+        .join(Fingerprint, Fingerprint.id == ListQuestion.f_id)
+        .outerjoin(Theme, Theme.id == Fingerprint.theme_id)
+        .outerjoin(CoreSubject, CoreSubject.id == Fingerprint.core_subject_id)
+        .where(*where).group_by(ListQuestion.period)).all())
+
     return QuestionPage(
         items=[_out(r) for r in rows],
+        period_counts=period_counts,
         total=total,
         page=page,
         per_page=per_page,

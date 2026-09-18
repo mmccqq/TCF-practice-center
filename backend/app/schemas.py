@@ -22,7 +22,7 @@ Naming: `...In` schemas are request bodies, `...Out` schemas are responses.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -166,6 +166,11 @@ class QuestionPage(BaseModel):
     endpoints never return everything at once."""
 
     items: List[QuestionOut]
+    # period -> how many entries that month has under the CURRENT filters, not
+    # how many happen to be on this page. The list page groups by month, and
+    # counting the loaded rows would under-report every month that straddles a
+    # page boundary - which, with infinite scroll, is most of them.
+    period_counts: Dict[str, int] = {}
     total: int
     page: int
     per_page: int
