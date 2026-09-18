@@ -210,6 +210,7 @@ def build_core_set(db: Session, tache: int,
     """
     rows = db.execute(
         select(Theme.name.label("theme"), CoreSubject.name.label("core_subject"),
+               CoreSubject.id.label("cs_id"),
                Fingerprint.id, Fingerprint.text, Fingerprint.total_sightings,
                Fingerprint.months_seen, Fingerprint.last_seen)
         .join(Fingerprint, Fingerprint.core_subject_id == CoreSubject.id)
@@ -219,12 +220,24 @@ def build_core_set(db: Session, tache: int,
     total = db.scalar(select(func.count()).select_from(Fingerprint)
                       .where(Fingerprint.tache == tache)) or 0
 
-    by_subject: dict[tuple[str, str], list] = {}
+    # distinct months per subject, as a union across its questions. Not derivable
+    # from the rows above: those carry a months_seen COUNT per question, and two
+    # questions each seen in six months might span anywhere from six months to
+    # twelve. Only list_questions knows which months.
+    subject_months = dict(db.execute(
+        select(CoreSubject.id, func.count(func.distinct(ListQuestion.period)))
+        .select_from(ListQuestion)
+        .join(Fingerprint, Fingerprint.id == ListQuestion.f_id)
+        .join(CoreSubject, CoreSubject.id == Fingerprint.core_subject_id)
+        .where(Fingerprint.tache == tache)
+        .group_by(CoreSubject.id)).all())
+
+    by_subject: dict[tuple[str, str, int], list] = {}
     for r in rows:
-        by_subject.setdefault((r.theme, r.core_subject), []).append(r)
+        by_subject.setdefault((r.theme, r.core_subject, r.cs_id), []).append(r)
 
     by_theme: dict[str, list[FrequentSubject]] = {}
-    for (theme, subject), members in by_subject.items():
+    for (theme, subject, cs_id), members in by_subject.items():
         if len(members) < min_questions:
             continue
         # most-sighted first, most recent breaking a tie, so questions[0] is
@@ -233,6 +246,7 @@ def build_core_set(db: Session, tache: int,
         by_theme.setdefault(theme, []).append(FrequentSubject(
             core_subject=subject,
             question_count=len(members),
+            months_seen=subject_months.get(cs_id, 0),
             total_sightings=sum(m.total_sightings for m in members),
             questions=[SubjectQuestion(f_id=m.id, text=m.text,
                                        total_sightings=m.total_sightings,
@@ -247,13 +261,16 @@ def build_core_set(db: Session, tache: int,
             theme=name,
             question_count=sum(s.question_count for s in subjects),
             total_sightings=sum(s.total_sightings for s in subjects),
-            subjects=sorted(subjects, key=lambda s: (-s.total_sightings,
-                                                     -s.question_count,
+            # ranked on the number the page prints, so the order explains
+            # itself; sightings only break ties
+            subjects=sorted(subjects, key=lambda s: (-s.months_seen,
+                                                     -s.total_sightings,
                                                      s.core_subject)),
         )
         for name, subjects in by_theme.items()
     ]
-    themes.sort(key=lambda t: (-t.total_sightings, t.theme))
+    themes.sort(key=lambda t: (-max((s.months_seen for s in t.subjects), default=0),
+                               -t.total_sightings, t.theme))
     return themes, len(rows), total
 
 

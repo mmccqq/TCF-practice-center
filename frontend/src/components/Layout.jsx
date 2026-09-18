@@ -91,7 +91,7 @@ export default function Layout() {
           <nav className="flex items-center gap-1">
             {/* first, and not inside Tools: this is the recommended path
                 through the bank, not a utility */}
-            <NavItem to="/core-set">Core&nbsp;set</NavItem>
+            <NavItem to="/core-set">Oral&nbsp;core&nbsp;set</NavItem>
             <NavItem to="/speaking/task2">Task&nbsp;2</NavItem>
             <NavItem to="/speaking/task3">Task&nbsp;3</NavItem>
             <ToolsMenu />

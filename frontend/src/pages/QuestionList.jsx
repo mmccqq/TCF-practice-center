@@ -124,14 +124,14 @@ export default function QuestionList({ tache }) {
 
       {/* the recommended path out of this list. A banner rather than a text
           link: this page is a thousand questions in date order, and most
-          people should be working the core set instead. */}
+          people should be working the oral core set instead. */}
       <Link
         to={`/core-set?tache=${tache}`}
         className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border-2
                    border-sky-500 bg-white p-3 transition hover:border-sky-600
                    hover:shadow-sm"
       >
-        <span className="text-sm font-semibold">Core set</span>
+        <span className="text-sm font-semibold">Oral core set</span>
         <span className="min-w-0 flex-1 text-sm text-slate-600">
           The subjects Task&nbsp;{tache} keeps coming back to, ranked by how often
           they have been asked.
@@ -241,8 +241,7 @@ export default function QuestionList({ tache }) {
                       }`}
                     >
                      <div className="min-w-0 flex-1">
-                      {(q.theme || q.core_subject || q.month_sightings > 1
-                        || q.months_seen > 1) && (
+                      {(q.theme || q.core_subject || q.months_seen > 1) && (
                         <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
                           {q.theme && (
                             <span className="rounded bg-sky-100 px-1.5 py-0.5 font-medium text-sky-800">
@@ -254,15 +253,12 @@ export default function QuestionList({ tache }) {
                               {q.core_subject}
                             </span>
                           )}
-                          {/* two different numbers: how often it came up in
-                              THIS month, and how many months it has appeared
-                              in overall. The second one is the useful signal
-                              and the old single table could not express it. */}
-                          {q.month_sightings > 1 && (
-                            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800">
-                              {q.month_sightings}&times; this month
-                            </span>
-                          )}
+                          {/* months, not sightings: `month_sightings` counts
+                              scraped reports, so "2x this month" usually means
+                              two sources filed the same sitting, not that the
+                              exam asked it twice. Months is the honest signal,
+                              and the one the old single table could not
+                              express. */}
                           {q.months_seen > 1 && (
                             <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-800">
                               asked in {q.months_seen} months

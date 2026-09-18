@@ -98,6 +98,11 @@ class FrequentSubject(BaseModel):
 
     core_subject: str
     question_count: int
+    # distinct months in which ANY question of this subject came up. The number
+    # shown to users, and what the ranking is on: `total_sightings` counts
+    # scraped reports, and 18% of month-entries were reported by more than one
+    # source, so it overstates how often the exam actually asked.
+    months_seen: int
     total_sightings: int
     # most-sighted first, so questions[0] is the representative
     questions: List[SubjectQuestion]

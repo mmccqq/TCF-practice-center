@@ -62,13 +62,14 @@ export default function Frequent() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Core set</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Oral core set</h1>
         <p className="mt-1 max-w-2xl text-sm text-slate-600">
           The subjects the exam keeps coming back to, grouped by theme. Each card is one core
           subject with at least {MIN_QUESTIONS} distinct questions behind it, showing
           the most-asked of them. Ordered by how often the subject has actually come
-          up. Tick a card to mark that subject done; finish every card in a theme and
-          the theme is done.
+          up — counted in exam months, so a question two sources both reported
+          still counts once. Tick a card to mark that subject done; finish every
+          card in a theme and the theme is done.
         </p>
       </div>
 
@@ -154,8 +155,7 @@ export default function Frequent() {
                                font-semibold text-slate-700 backdrop-blur">
                   {t.theme}
                   <span className="font-normal text-slate-400">
-                    {t.subjects.length} subject{t.subjects.length === 1 ? '' : 's'} ·{' '}
-                    {t.total_sightings} sightings
+                    {t.subjects.length} subject{t.subjects.length === 1 ? '' : 's'}
                   </span>
                   {user && (
                     <span className="ml-auto flex items-center gap-2">
@@ -190,14 +190,13 @@ export default function Frequent() {
                             <span className="rounded bg-violet-100 px-1.5 py-0.5 font-medium text-violet-800">
                               {s.core_subject}
                             </span>
+                            {/* months, not scraped reports: two sources filing
+                                the same sitting is one exam, and 18% of
+                                month-entries have more than one report */}
                             <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800">
-                              asked {s.total_sightings}&times;
+                              came up in {s.months_seen} month
+                              {s.months_seen === 1 ? '' : 's'}
                             </span>
-                            {s.months_seen > 1 && (
-                              <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-800">
-                                top question in {s.months_seen} months
-                              </span>
-                            )}
 
                           </div>
                           <p className="leading-relaxed">{s.questions[0].text}</p>
@@ -227,8 +226,8 @@ export default function Frequent() {
                                       {q.text}
                                     </p>
                                     <p className="mt-0.5 text-xs text-slate-400">
-                                      asked {q.total_sightings}&times;
-                                      {q.months_seen > 1 && ` in ${q.months_seen} months`}
+                                      seen in {q.months_seen} month
+                                      {q.months_seen === 1 ? '' : 's'}
                                       {q.last_seen && ` · last ${q.last_seen}`}
                                     </p>
                                   </div>

@@ -5,7 +5,7 @@ import { useAuth } from '../lib/auth'
 import { ProgressBar } from '../lib/progress'
 
 /** The flagship card. Full width and above the task grid, because working
- *  through the core set is the recommended path, not one option among three. */
+ *  through the oral core set is the recommended path, not one option among three. */
 function CoreSetCard({ progress }) {
   const done = progress?.done ?? 0
   const total = progress?.total ?? 0
@@ -16,7 +16,7 @@ function CoreSetCard({ progress }) {
                  hover:border-sky-600 hover:shadow-md"
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-lg font-semibold">Core set</h3>
+        <h3 className="text-lg font-semibold">Oral core set</h3>
         <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800">
           Start here
         </span>
@@ -36,7 +36,7 @@ function CoreSetCard({ progress }) {
             </span>
           </>
         ) : (
-          <span className="text-sm font-medium text-sky-700">Open the core set &rarr;</span>
+          <span className="text-sm font-medium text-sky-700">Open the oral core set &rarr;</span>
         )}
       </div>
     </Link>
@@ -85,7 +85,7 @@ export default function Home() {
   const { data } = useQuery({ queryKey: ['meta'], queryFn: questionsMeta })
   const counts = data?.counts
 
-  // a small dedicated endpoint, not the core set itself: this is one line of
+  // a small dedicated endpoint, not the oral core set itself: this is one line of
   // text and the full set is 27 KB gzipped
   const { data: progress } = useQuery({
     queryKey: ['core-progress', 2],
