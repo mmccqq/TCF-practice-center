@@ -33,8 +33,8 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow) # default = utcnow() will call the function immediately when the model is defined.
 
-    attempts: Mapped[List["Attempt"]] = relationship(back_populates="user",
-                                                     cascade="all, delete-orphan")
+    questions: Mapped[List["UserQuestion"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan")
 
 
 # --------------------------------------------------------------------------
@@ -222,26 +222,52 @@ class ListQuestion(Base):
     )
 
 
-class Attempt(Base):
-    """Phase 2 progress tracking. Unused by the phase 0 UI.
+class UserQuestion(Base):
+    """What one user has done with one question.
 
-    Keyed on the **fingerprint**, not on a list row. "Tried" means tried this
-    question, not tried September's copy of it, so practising a question in one
-    month marks it practised in every month it recurs in - and because the
-    fingerprint derives from the text rather than from a scraper id that can
-    move, progress survives a re-scrape.
+    One row per (user, question) holding every per-question flag, rather than a
+    table per feature. The bookmarks page needs to know both whether a question
+    is bookmarked and whether it is practised, and splitting those across two
+    tables would mean reassembling one concept - "this user's relationship to
+    this question" - on every read. Notes, ratings and spaced-repetition state
+    belong here too when they arrive.
+
+    Keyed on the **fingerprint**, not on a list row. A question that recurred in
+    eight months is eight cards on the list page but one thing to practise, so
+    marking any one of them marks all eight - see step 5 of "Core question set
+    design.md".
+
+    A row exists only while at least one flag is set; clearing the last one
+    deletes it, because "never touched" and "un-marked" are the same state to a
+    user and keeping the distinction would need explaining somewhere.
     """
 
-    __tablename__ = "attempts"
+    __tablename__ = "user_questions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    f_id: Mapped[int] = mapped_column(ForeignKey("fingerprints.id", ondelete="CASCADE"),
-                                      index=True)
-    practiced: Mapped[bool] = mapped_column(Boolean, default=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"),
+                                         index=True)
+    f_id: Mapped[int] = mapped_column(
+        ForeignKey("fingerprints.id", ondelete="CASCADE"), index=True)
+
+    practiced: Mapped[bool] = mapped_column(Boolean, default=False)
+    practiced_at: Mapped[Optional[dt.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
+    bookmarked: Mapped[bool] = mapped_column(Boolean, default=False)
+    # the bookmarks page orders by this, so it is a column rather than a
+    # derivation from updated_at - which would change when the question was
+    # practised and silently reorder the list
+    bookmarked_at: Mapped[Optional[dt.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True),
                                                     default=utcnow, onupdate=utcnow)
 
-    user: Mapped["User"] = relationship(back_populates="attempts")
+    user: Mapped["User"] = relationship(back_populates="questions")
 
-    __table_args__ = (UniqueConstraint("user_id", "f_id", name="uq_attempt_user_fingerprint"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "f_id", name="uq_user_question_user_f"),
+        # "my bookmarks, newest first" - the bookmarks page's only query
+        Index("ix_user_questions_user_bookmarked", "user_id", "bookmarked_at"),
+    )

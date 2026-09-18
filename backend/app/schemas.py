@@ -21,6 +21,7 @@ Naming: `...In` schemas are request bodies, `...Out` schemas are responses.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -69,6 +70,39 @@ class QuestionOut(BaseModel):
     months_seen: int
     first_seen: Optional[str] = None
     last_seen: Optional[str] = None
+
+
+class ProgressOut(BaseModel):
+    """What one user has touched, as two id lists.
+
+    Fingerprint ids, not list-row ids: a question recurring in eight months is
+    one entry here and eight ticked cards on the page.
+    """
+
+    practiced: List[int]
+    bookmarked: List[int]
+
+
+class BookmarkOut(BaseModel):
+    """A bookmarked question, for the bookmarks page.
+
+    One row per question rather than per month - a bookmark is on the question
+    - so this carries `last_seen` and `months_seen` instead of a single period.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    f_id: int
+    tache: int
+    text: str
+    theme: Optional[str] = None
+    abstract: Optional[str] = None
+    core_subject: Optional[str] = None
+    last_seen: Optional[str] = None
+    months_seen: int
+    total_sightings: int
+    bookmarked_at: Optional[datetime] = None
+    practiced: bool
 
 
 class QuestionPage(BaseModel):

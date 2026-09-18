@@ -1,5 +1,67 @@
-import { Link, NavLink, Outlet } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
+
+const TOOLS = [
+  { to: '/tools/bookmarks', label: 'Oral bookmarks' },
+]
+
+function ToolsMenu() {
+  const [open, setOpen] = useState(false)
+  const box = useRef(null)
+  const { pathname } = useLocation()
+  const active = TOOLS.some((t) => pathname.startsWith(t.to))
+
+  // close on an outside click or Escape, so the menu cannot be left hanging
+  useEffect(() => {
+    if (!open) return
+    const away = (e) => { if (!box.current?.contains(e.target)) setOpen(false) }
+    const esc = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', away)
+    document.addEventListener('keydown', esc)
+    return () => {
+      document.removeEventListener('mousedown', away)
+      document.removeEventListener('keydown', esc)
+    }
+  }, [open])
+
+  // close on navigation, or the menu stays open over the page it opened
+  useEffect(() => setOpen(false), [pathname])
+
+  return (
+    <div ref={box} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+          active ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+        }`}
+      >
+        Tools <span aria-hidden="true" className="text-xs">▾</span>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute left-0 z-20 mt-1 min-w-44 rounded-md border border-slate-200
+                     bg-white py-1 shadow-lg"
+        >
+          {TOOLS.map((t) => (
+            <NavLink
+              key={t.to}
+              to={t.to}
+              role="menuitem"
+              className="block px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100"
+            >
+              {t.label}
+            </NavLink>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function NavItem({ to, children }) {
   return (
@@ -28,6 +90,7 @@ export default function Layout() {
           <nav className="flex items-center gap-1">
             <NavItem to="/speaking/task2">Task&nbsp;2</NavItem>
             <NavItem to="/speaking/task3">Task&nbsp;3</NavItem>
+            <ToolsMenu />
           </nav>
           <div className="ml-auto flex items-center gap-2 text-sm">
             {user ? (
