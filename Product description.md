@@ -36,7 +36,7 @@ Admin and content operations
 
 The question bank is not hand-written, and keeping it accurate is most of the work. An admin area inside the platform — gated on an account flag rather than run as a separate application — covers the whole curation loop.
 
-Vocabulary management. Themes and their controlled vocabularies are stored as tables with foreign keys, so a label nobody approved cannot be attached to a question. Each label is shown with how many questions use it, which is what exposes dead entries and near-duplicates. Labels can be added, renamed, moved between themes, and merged; merging repoints every affected question and then removes the old label. Deleting a label that is still in use is refused, so no action can silently strip labels from questions.
+Vocabulary management. Themes and their controlled vocabularies are stored as tables with foreign keys, so a label nobody approved cannot be attached to a question. Each label is shown with how many questions use it, sssssssssssswhich is what exposes dead entries and near-duplicates. Labels can be added, renamed, moved between themes, and merged; merging repoints every affected question and then removes the old label. Deleting a label that is still in use is refused, so no action can silently strip labels from questions.
 
 Labelling workspace. Questions can be filtered to those missing a theme, core subject, or abstract, then edited in place or assigned in bulk. Core subjects are scoped to their theme, so an inconsistent pairing cannot be saved at all.
 
