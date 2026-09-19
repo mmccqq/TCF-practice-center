@@ -212,6 +212,7 @@ class UserOut(BaseModel):
     email: EmailStr
     display_name: Optional[str] = None
     auth_provider: str
+    is_admin: bool = False
 
 
 class TokenOut(BaseModel):

@@ -10,6 +10,8 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
 from .routers import progress as progress_router
+from .routers import admin as admin_router
+from .routers import admin_review as admin_review_router
 from .routers import auth as auth_router
 from .routers import questions as questions_router
 
@@ -49,6 +51,8 @@ app.add_middleware(
 
 app.include_router(questions_router.router)
 app.include_router(progress_router.router)
+app.include_router(admin_router.router)
+app.include_router(admin_review_router.router)
 app.include_router(auth_router.router)
 
 

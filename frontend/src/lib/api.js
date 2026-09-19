@@ -65,6 +65,46 @@ export const frequentSubjects = (params) =>
 export const questionsMeta = (params) =>
   api('/api/questions/meta' + (params ? `?${new URLSearchParams(params)}` : ''))
 export const googleConfig = () => api('/api/auth/google/config')
+
+// ---- admin. Every one of these 403s for a signed-in non-admin. ----
+const adminGet = (path, params) =>
+  api(`/api/admin/${path}${params ? `?${new URLSearchParams(params)}` : ''}`, { auth: true })
+
+export const adminVocabulary = (params) => adminGet('vocabulary', params)
+export const adminCreateTheme = (body) =>
+  api('/api/admin/themes', { method: 'POST', body, auth: true })
+export const adminRenameTheme = (id, body) =>
+  api(`/api/admin/themes/${id}`, { method: 'PATCH', body, auth: true })
+export const adminDeleteTheme = (id) =>
+  api(`/api/admin/themes/${id}`, { method: 'DELETE', auth: true })
+export const adminCreateSubject = (body) =>
+  api('/api/admin/core-subjects', { method: 'POST', body, auth: true })
+export const adminUpdateSubject = (id, body) =>
+  api(`/api/admin/core-subjects/${id}`, { method: 'PATCH', body, auth: true })
+export const adminDeleteSubject = (id) =>
+  api(`/api/admin/core-subjects/${id}`, { method: 'DELETE', auth: true })
+export const adminMergeSubject = (id, intoId) =>
+  api(`/api/admin/core-subjects/${id}/merge`, { method: 'POST', body: { into_id: intoId }, auth: true })
+
+export const adminQuestions = (params) => adminGet('questions', params)
+export const adminSetLabels = (fId, body) =>
+  api(`/api/admin/questions/${fId}`, { method: 'PATCH', body, auth: true })
+export const adminBulkLabel = (body) =>
+  api('/api/admin/questions/bulk', { method: 'POST', body, auth: true })
+
+export const adminBatches = () => adminGet('reviews')
+export const adminBatch = (id, params) => adminGet(`reviews/${id}`, params)
+export const adminCreateBatch = (body) =>
+  api('/api/admin/reviews', { method: 'POST', body, auth: true })
+export const adminDecide = (batchId, itemId, decision) =>
+  api(`/api/admin/reviews/${batchId}/items/${itemId}`,
+      { method: 'PATCH', body: { decision }, auth: true })
+export const adminApplyBatch = (id) =>
+  api(`/api/admin/reviews/${id}/apply`, { method: 'POST', body: {}, auth: true })
+export const adminDeleteBatch = (id) =>
+  api(`/api/admin/reviews/${id}`, { method: 'DELETE', auth: true })
+export const adminCompare = (body) =>
+  api('/api/admin/compare', { method: 'POST', body, auth: true })
 export const signup = (body) => api('/api/auth/signup', { method: 'POST', body })
 export const login = (body) => api('/api/auth/login', { method: 'POST', body })
 export const fetchMe = () => api('/api/auth/me', { auth: true })

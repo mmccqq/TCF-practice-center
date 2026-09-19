@@ -77,3 +77,15 @@ def current_user(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "not authenticated",
                             headers={"WWW-Authenticate": "Bearer"})
     return user
+
+
+def current_admin(user: User = Depends(current_user)) -> User:
+    """Gate for /api/admin/*.
+
+    403, not 404: hiding the endpoint's existence from a signed-in
+    non-admin buys nothing here, and a clear refusal is easier to debug than a
+    route that appears not to exist.
+    """
+    if not user.is_admin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "admin only")
+    return user

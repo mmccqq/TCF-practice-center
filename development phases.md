@@ -11,9 +11,9 @@ set up the platform.
 Phase 1:
 1. no need of sources filter on the questionList page.
 
-1. high frequency bank for 6 months and 12 months
-2. progress tracking for each user and each question(practiced or not)
-3. operating system 
+2. high frequency bank for 6 months and 12 months
+3. progress tracking for each user and each question(practiced or not)
+4. operating system 
    
 Phase 2:
 material support

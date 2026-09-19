@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import (Boolean, DateTime, ForeignKey, Index, Integer, String,
-                        Text, UniqueConstraint)
+from sqlalchemy import (JSON, Boolean, DateTime, ForeignKey, Index, Integer,
+                        String, Text, UniqueConstraint)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import List, Optional
 
@@ -31,6 +31,10 @@ class User(Base):
     auth_provider: Mapped[str] = mapped_column(String(20), default="local")
     google_sub: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # admin unlocks /api/admin/* - the vocabulary, labelling and review tools.
+    # A column rather than an env var listing emails: the check has to work the
+    # same on a laptop and on Render, and an email list drifts.
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow) # default = utcnow() will call the function immediately when the model is defined.
 
     questions: Mapped[List["UserQuestion"]] = relationship(
@@ -220,6 +224,63 @@ class ListQuestion(Base):
         # how the list page reads it: one task, newest month first
         Index("ix_list_questions_tache_period", "tache", "period"),
     )
+
+
+# --------------------------------------------------------------------------
+# Admin review queues.
+#
+# review.html did this in localStorage, which meant a cleared browser lost the
+# adjudication and a second machine could not see it. A batch is an uploaded
+# llm.py or compare.py output; an item is one question with the candidate
+# answers that run produced, plus whatever the reviewer decided.
+#
+# The decision is stored as the label TEXT, not a foreign key: a reviewer can
+# type a value that is not in the vocabulary yet, and refusing it at review
+# time would hide exactly the drift the review is meant to surface. Resolution
+# to ids happens at apply time, where unresolvable values are reported.
+# --------------------------------------------------------------------------
+
+
+class ReviewBatch(Base):
+    __tablename__ = "review_batches"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    # which label this batch is about: theme | abstract | core_subject
+    field: Mapped[str] = mapped_column(String(20), index=True)
+    tache: Mapped[int] = mapped_column(Integer, index=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True),
+                                                    default=utcnow)
+    applied_at: Mapped[Optional[dt.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
+    items: Mapped[List["ReviewItem"]] = relationship(
+        back_populates="batch", cascade="all, delete-orphan")
+
+
+class ReviewItem(Base):
+    __tablename__ = "review_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    batch_id: Mapped[int] = mapped_column(
+        ForeignKey("review_batches.id", ondelete="CASCADE"), index=True)
+    # nullable: an uploaded row may name a question that is not in the database,
+    # and losing it silently would make the counts lie
+    f_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("fingerprints.id", ondelete="CASCADE"), nullable=True, index=True)
+    # the id as it appeared in the file, so an unmatched row can still be shown
+    source_id: Mapped[str] = mapped_column(String(40))
+    text: Mapped[str] = mapped_column(Text)
+    # {"gpt-5.6": "Travel & tourism", "deepseek": "Transport & mobility"} - one
+    # entry for a single run, several when the upload is a comparison
+    candidates: Mapped[dict] = mapped_column(JSON, default=dict)
+    # what the reviewer chose. Null means undecided; "" means explicitly skipped
+    decision: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    decided_at: Mapped[Optional[dt.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
+    batch: Mapped["ReviewBatch"] = relationship(back_populates="items")
 
 
 class UserQuestion(Base):

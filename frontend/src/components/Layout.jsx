@@ -95,6 +95,9 @@ export default function Layout() {
             <NavItem to="/speaking/task2">Task&nbsp;2</NavItem>
             <NavItem to="/speaking/task3">Task&nbsp;3</NavItem>
             <ToolsMenu />
+            {/* the real gate is current_admin on the server; this only decides
+                whether to draw the link */}
+            {user?.is_admin && <NavItem to="/admin">Admin</NavItem>}
           </nav>
           <div className="ml-auto flex items-center gap-2 text-sm">
             {user ? (
