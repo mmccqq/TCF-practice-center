@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
+import heroImage from '../assets/hero-toronto.jpg'
 import { coreSetProgress, questionsMeta } from '../lib/api'
 import { useAuth } from '../lib/auth'
 import { ProgressBar } from '../lib/progress'
@@ -17,14 +18,14 @@ function CoreSetCard({ progress }) {
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="text-lg font-semibold">Oral core set</h3>
-        <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800">
+        {/* sized against the heading beside it, not against the small chips
+            used elsewhere - this is the card's call to action */}
+        <span className="rounded-full bg-sky-100 px-3.5 py-1 text-base font-semibold text-sky-800">
           Start here
         </span>
       </div>
       <p className="mt-1 max-w-xl text-sm text-slate-600">
-        The subjects the exam keeps coming back to, ranked by how often they have
-        actually been asked. Work through these and you have covered what really
-        gets tested — instead of scrolling a thousand questions in date order.
+        Prepare the necessary questions to save hundreds of hours practicing a thousand questions.
       </p>
       <div className="mt-3 flex flex-wrap items-center gap-3">
         {total > 0 ? (
@@ -95,19 +96,33 @@ export default function Home() {
 
   return (
     <div className="space-y-10">
-      <section>
-        <h1 className="text-3xl font-bold tracking-tight">
-          Prepare for TCF Canada with real past questions
-        </h1>
-        <p className="mt-3 max-w-2xl text-slate-600">
-          Most French practice is generic. This is an archive of questions that have actually
-          appeared on the TCF Canada exam, collected from public practice sources and
-          deduplicated across them, so you can see what really gets asked &mdash; and how often.
-        </p>
-        <p className="mt-2 max-w-2xl text-sm text-slate-500">
-          Speaking Tasks 2 and 3 carry the most preparation value, so coverage there is
-          deepest. Model answers and flashcards are on the way.
-        </p>
+      <section className="relative overflow-hidden rounded-xl">
+        {/* The photo sits in its own layer rather than on the section, so the
+            blur cannot soften the text above it. Scaled past the edges because
+            a blur samples beyond its own bounds and would otherwise leave a
+            pale fringe around the card. */}
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 scale-105 bg-cover bg-center blur-xs"
+          style={{ backgroundImage: `url(${heroImage})` }}
+        />
+        {/* the photo is bright in places, so the text needs its own contrast
+            rather than relying on the picture staying dark */}
+        <div aria-hidden="true" className="absolute inset-0 bg-slate-900/55" />
+
+        <div className="relative px-6 py-14 text-center sm:py-20">
+          <h1 className="text-4xl font-bold tracking-tight text-white sm:text-5xl">
+            TCF practice
+          </h1>
+          <p className="mt-4 flex flex-wrap items-center justify-center gap-x-3 gap-y-1
+                        text-base font-medium text-sky-100 sm:text-lg">
+            <span>Core sets</span>
+            <span aria-hidden="true" className="text-sky-300/70">&middot;</span>
+            <span>Supportive materials</span>
+            <span aria-hidden="true" className="text-sky-300/70">&middot;</span>
+            <span>Ace CLB&nbsp;7</span>
+          </p>
+        </div>
       </section>
 
       <section>

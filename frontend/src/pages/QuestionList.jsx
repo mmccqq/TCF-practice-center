@@ -127,20 +127,25 @@ export default function QuestionList({ tache }) {
           people should be working the oral core set instead. */}
       <Link
         to={`/core-set?tache=${tache}`}
-        className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border-2
-                   border-sky-500 bg-white p-3 transition hover:border-sky-600
-                   hover:shadow-sm"
+        className="block rounded-lg border-2 border-sky-500 bg-white p-3 transition
+                   hover:border-sky-600 hover:shadow-sm"
       >
-        <span className="text-sm font-semibold">Oral core set</span>
-        <span className="min-w-0 flex-1 text-sm text-slate-600">
+        {/* title, progress and arrow share the first row; the description gets
+            its own, so it is not competing for width with the bar */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="text-sm font-semibold">Oral core set</span>
+          {coreProgress?.total > 0 && (
+            <ProgressBar done={coreProgress.done} total={coreProgress.total}
+                         label={`${coreProgress.done} of ${coreProgress.total} core subjects practised`} />
+          )}
+          <span className="ml-auto text-sm font-medium text-sky-700" aria-hidden="true">
+            &rarr;
+          </span>
+        </div>
+        <p className="mt-1 text-sm text-slate-600">
           The subjects Task&nbsp;{tache} keeps coming back to, ranked by how often
           they have been asked.
-        </span>
-        {coreProgress?.total > 0 && (
-          <ProgressBar done={coreProgress.done} total={coreProgress.total}
-                       label={`${coreProgress.done} of ${coreProgress.total} core subjects practised`} />
-        )}
-        <span className="text-sm font-medium text-sky-700" aria-hidden="true">&rarr;</span>
+        </p>
       </Link>
 
       <form

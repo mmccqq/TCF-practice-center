@@ -63,14 +63,17 @@ export default function Frequent() {
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Oral core set</h1>
-        <p className="mt-1 max-w-2xl text-sm text-slate-600">
-          The subjects the exam keeps coming back to, grouped by theme. Each card is one core
-          subject with at least {MIN_QUESTIONS} distinct questions behind it, showing
-          the most-asked of them. Ordered by how often the subject has actually come
-          up — counted in exam months, so a question two sources both reported
-          still counts once. Tick a card to mark that subject done; finish every
-          card in a theme and the theme is done.
-        </p>
+        {/* the shared styling lives on the wrapper, so the paragraphs cannot
+            drift apart and space-y controls the gap in one place */}
+        <div className="mt-2 max-w-2xl space-y-2 text-sm text-slate-600">
+          <p>
+            The subjects the exam keeps coming back to, but this core set mean to save you.
+          </p>
+          <p>
+            Tick a card to mark that subject done; finish every card in a theme and
+            the theme is done. Good luck!
+          </p>
+        </div>
       </div>
 
       <div className="flex gap-1">
@@ -105,8 +108,7 @@ export default function Frequent() {
           {/* the page can only see labelled questions, and saying so is the
               difference between "this is the bank" and "this is part of it" */}
           <p className="text-sm text-slate-500">
-            Built from the {data.labelled.toLocaleString()} labelled questions of{' '}
-            {data.total.toLocaleString()} in Task {tache}. browse all questions on the{' '}
+            Browse all questions on the{' '}
             <Link to={`/speaking/task${tache}`} className="text-sky-700 hover:underline">
               Task {tache} list
             </Link>.
