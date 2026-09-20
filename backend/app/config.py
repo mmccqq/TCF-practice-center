@@ -15,7 +15,21 @@ from typing import List
 # you two databases.
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Put backend/.env into the real process environment, not just into Settings.
+#
+# pydantic-settings reads the file into the fields declared below and nowhere
+# else, so a variable it does not declare - OPENAI_API_KEY, say - would sit in
+# .env being silently ignored. questions_processing/llm.py reads os.environ
+# directly, as any library would, so the admin Runs tab would report "no API
+# key on this server" while the key was right there in the file.
+#
+# override=False: a variable already exported in the shell wins, which is what
+# makes `DATABASE_URL=... python script.py` keep working, and means Render's
+# environment is never shadowed by a stray .env in an image.
+load_dotenv(BACKEND_DIR / ".env", override=False)
 
 
 class Settings(BaseSettings):

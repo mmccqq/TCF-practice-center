@@ -5,6 +5,7 @@ import {
   invalidatePublic,
 } from '../../lib/api'
 import { TacheTabs } from './AdminLayout'
+import RunJobDialog from './RunJobDialog'
 
 const PER_PAGE = 50
 
@@ -15,6 +16,7 @@ export default function Labelling() {
   })
   const [page, setPage] = useState(1)
   const [picked, setPicked] = useState(() => new Set())
+  const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
   const qc = useQueryClient()
 
@@ -96,10 +98,30 @@ export default function Labelling() {
     return next
   })
 
+  // this page's rows, not the whole filter: selecting 826 questions from a
+  // button that shows 50 would be a promise the screen cannot back up
+  const pageIds = (data?.items ?? []).map((r) => r.f_id)
+  const allPicked = pageIds.length > 0 && pageIds.every((id) => picked.has(id))
+  const toggleAll = () => setPicked((prev) => {
+    const next = new Set(prev)
+    pageIds.forEach((id) => (allPicked ? next.delete(id) : next.add(id)))
+    return next
+  })
+
   const pages = data ? Math.max(1, Math.ceil(data.total / PER_PAGE)) : 1
 
   return (
     <div className="space-y-4">
+      {running && (
+        <RunJobDialog
+          tache={tache}
+          // the job labels whichever field the filter is hunting for; with no
+          // filter, the theme is the one everything else depends on
+          task={filters.unlabelled || 'theme'}
+          fIds={[...picked]}
+          onClose={() => setRunning(false)}
+        />
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <TacheTabs tache={tache} onChange={(t) => { setTache(t); setPage(1); setPicked(new Set()) }} />
         <select
@@ -159,6 +181,24 @@ export default function Labelling() {
         <span className="text-sm text-slate-500">
           {data ? `${data.total.toLocaleString()} question${data.total === 1 ? '' : 's'}` : ''}
         </span>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={toggleAll}
+            disabled={!pageIds.length}
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-40"
+          >
+            {allPicked ? 'Clear page' : `Select all ${pageIds.length}`}
+          </button>
+          <button
+            onClick={() => setRunning(true)}
+            disabled={!picked.size}
+            title={picked.size ? '' : 'Select some questions first'}
+            className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white
+                       disabled:opacity-40"
+          >
+            Run a job{picked.size ? ` (${picked.size})` : ''}
+          </button>
+        </div>
       </div>
 
       {error && <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p>}

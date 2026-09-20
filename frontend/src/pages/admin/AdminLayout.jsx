@@ -2,6 +2,8 @@ import { NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../../lib/auth'
 
 const TABS = [
+  { to: '/admin/data', label: 'Data' },
+  { to: '/admin/jobs', label: 'Runs' },
   { to: '/admin/vocabulary', label: 'Vocabulary' },
   { to: '/admin/questions', label: 'Labelling' },
   { to: '/admin/reviews', label: 'Review' },

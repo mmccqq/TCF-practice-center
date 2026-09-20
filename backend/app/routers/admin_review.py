@@ -73,15 +73,31 @@ def _resolve_ids(db: Session, rows: list[dict]) -> dict[str, Optional[int]]:
 
 
 class BatchIn(BaseModel):
+    """Rows for one batch.
+
+    `runs` is the interesting form: several labelling runs over the same
+    questions, merged into one batch so every question carries every model's
+    answer. That removes a whole pass - apply one run, compare, review the
+    disagreements becomes upload both, accept what they agree on, review the
+    rest.
+    """
+
     name: str = Field(min_length=1, max_length=200)
     tache: int = Field(2, ge=2, le=3)
     field: Optional[str] = None      # inferred from the rows when omitted
-    rows: list[dict]
+    rows: list[dict] = []
+    runs: dict[str, list[dict]] = {}
 
 
 class DecisionIn(BaseModel):
     # "" is a real value meaning "skip this one", distinct from null/undecided
     decision: Optional[str] = None
+
+
+class AgreedIn(BaseModel):
+    """Accept every item whose runs all said the same thing."""
+
+    overwrite: bool = False
 
 
 class DecideAllIn(BaseModel):
@@ -115,13 +131,29 @@ def _infer_field(rows: list[dict]) -> str:
 @router.post("/reviews", status_code=status.HTTP_201_CREATED)
 def create_batch(payload: BatchIn, admin: User = Depends(current_admin),
                  db: Session = Depends(get_db)) -> dict:
-    if not payload.rows:
+    rows = payload.rows
+    if payload.runs:
+        # merge the runs on question id, so one item holds every model's answer
+        field = payload.field or _infer_field(
+            [r for rs in payload.runs.values() for r in rs])
+        merged: dict[str, dict] = {}
+        for run, run_rows in payload.runs.items():
+            for r in run_rows:
+                value = r.get(field)
+                if value is None:
+                    continue
+                item = merged.setdefault(str(r.get("id")),
+                                         {"id": r.get("id"), "labels": {},
+                                          "field": field, "text": r.get("text", "")})
+                item["labels"][run] = value
+        rows = list(merged.values())
+    if not rows:
         raise HTTPException(422, "no rows")
-    field = payload.field or _infer_field(payload.rows)
+    field = payload.field or _infer_field(rows)
     if field not in FIELDS:
         raise HTTPException(422, f"field must be one of {list(FIELDS)}")
 
-    resolved = _resolve_ids(db, payload.rows)
+    resolved = _resolve_ids(db, rows)
     texts = dict(db.execute(
         select(Fingerprint.id, Fingerprint.text)
         .where(Fingerprint.id.in_([v for v in resolved.values() if v]))).all())
@@ -132,7 +164,7 @@ def create_batch(payload: BatchIn, admin: User = Depends(current_admin),
     db.flush()
 
     unmatched = 0
-    for r in payload.rows:
+    for r in rows:
         sid = str(r.get("id"))
         f_id = resolved.get(sid)
         if f_id is None:
@@ -148,7 +180,7 @@ def create_batch(payload: BatchIn, admin: User = Depends(current_admin),
         ))
     db.commit()
     return {"id": batch.id, "name": batch.name, "field": field,
-            "items": len(payload.rows), "unmatched": unmatched}
+            "items": len(rows), "unmatched": unmatched}
 
 
 @router.get("/reviews")
@@ -231,6 +263,50 @@ def get_batch(batch_id: int, undecided: bool = Query(False),
     }
 
 
+@router.get("/reviews/{batch_id}/stats")
+def batch_stats(batch_id: int, db: Session = Depends(get_db)) -> dict:
+    """Agreement across the runs in one batch.
+
+    The same numbers the Compare tab shows for uploaded files, read from a
+    batch instead - so a comparison run by the server is analysed without
+    exporting anything. Crucially the batch still holds every item, agreed
+    ones included, so applying it writes the whole comparison in one pass.
+    """
+    b = db.get(ReviewBatch, batch_id)
+    if b is None:
+        raise HTTPException(404, "batch not found")
+
+    items = db.scalars(select(ReviewItem)
+                       .where(ReviewItem.batch_id == batch_id)).all()
+    runs = sorted({r for i in items for r in i.candidates})
+    compared = [i for i in items if len(i.candidates) == len(runs) >= 2]
+    agreed = [i for i in compared if len({_key(v) for v in i.candidates.values()}) == 1]
+    split = [i for i in compared if i not in agreed]
+
+    pairs: collections.Counter = collections.Counter()
+    contested: collections.Counter = collections.Counter()
+    for i in split:
+        distinct = sorted(set(i.candidates.values()), key=_key)
+        pairs[" | ".join(distinct)] += 1
+        for v in distinct:
+            contested[v] += 1
+
+    return {
+        "id": b.id, "name": b.name, "field": b.field, "tache": b.tache,
+        "runs": runs,
+        "items": len(items),
+        "compared": len(compared),
+        "only_in_some": len(items) - len(compared),
+        "agreed": len(agreed),
+        "disagreed": len(split),
+        "agreement": round(len(agreed) / len(compared), 4) if compared else 0,
+        "decided": sum(1 for i in items if i.decision is not None),
+        "applied_at": b.applied_at,
+        "label_pairs": [{"pair": k, "count": v} for k, v in pairs.most_common()],
+        "contested_labels": [{"label": k, "count": v} for k, v in contested.most_common()],
+    }
+
+
 @router.patch("/reviews/{batch_id}/items/{item_id}")
 def decide(batch_id: int, item_id: int, payload: DecisionIn,
            db: Session = Depends(get_db)) -> dict:
@@ -279,6 +355,44 @@ def decide_all(batch_id: int, payload: DecideAllIn,
         decided += 1
     db.commit()
     return {"decided": decided, "left_for_you": ambiguous, "already_decided": kept}
+
+
+@router.post("/reviews/{batch_id}/decide-agreed")
+def decide_agreed(batch_id: int, payload: AgreedIn,
+                  db: Session = Depends(get_db)) -> dict:
+    """Take the answer wherever every run gave the same one.
+
+    This is the triage that makes a two-model run cheaper than a one-model run
+    plus a re-read: agreement is not proof, but it is a good enough filter that
+    the reviewer's time goes to the split decisions. Measured on this corpus,
+    two models agreed on about 90% of themes.
+
+    Items with a single candidate are left alone - one run agreeing with itself
+    is not agreement, and accepting those is what `decide-all` is for.
+    """
+    b = db.get(ReviewBatch, batch_id)
+    if b is None:
+        raise HTTPException(404, "batch not found")
+
+    agreed = split = single = kept = 0
+    now = utcnow()
+    for item in db.scalars(select(ReviewItem)
+                           .where(ReviewItem.batch_id == batch_id)).all():
+        if item.decision is not None and not payload.overwrite:
+            kept += 1
+            continue
+        values = list(item.candidates.values())
+        if len(values) < 2:
+            single += 1
+            continue
+        if len({_key(v) for v in values}) > 1:
+            split += 1
+            continue
+        item.decision, item.decided_at = str(values[0]), now
+        agreed += 1
+    db.commit()
+    return {"agreed": agreed, "disagreed": split, "single_run": single,
+            "already_decided": kept}
 
 
 @router.post("/reviews/{batch_id}/apply")

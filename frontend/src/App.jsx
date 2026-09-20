@@ -2,6 +2,8 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import Layout from './components/Layout'
 import AdminLayout from './pages/admin/AdminLayout'
 import Compare from './pages/admin/Compare'
+import Data from './pages/admin/Data'
+import Jobs from './pages/admin/Jobs'
 import Labelling from './pages/admin/Labelling'
 import Review from './pages/admin/Review'
 import Vocabulary from './pages/admin/Vocabulary'
@@ -23,7 +25,9 @@ export default function App() {
         {/* the page lived under /tools before it was promoted */}
         <Route path="/tools/frequent" element={<Navigate to="/core-set" replace />} />
         <Route path="/admin" element={<AdminLayout />}>
-          <Route index element={<Navigate to="/admin/vocabulary" replace />} />
+          <Route index element={<Navigate to="/admin/data" replace />} />
+          <Route path="data" element={<Data />} />
+          <Route path="jobs" element={<Jobs />} />
           <Route path="vocabulary" element={<Vocabulary />} />
           <Route path="questions" element={<Labelling />} />
           <Route path="reviews" element={<Review />} />

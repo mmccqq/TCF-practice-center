@@ -241,6 +241,56 @@ class ListQuestion(Base):
 # --------------------------------------------------------------------------
 
 
+class LlmJob(Base):
+    """One labelling run, executed by the server.
+
+    The admin system used to only ingest llm.py output; now it can run it. That
+    means the work outlives an HTTP request - 152 questions at chunk 20 is
+    eight API calls and several minutes - so the job is a row, not a response,
+    and the browser polls it.
+
+    It also means the job can die without finishing: a deploy restarts the
+    process, and Render's free instance stops the container when it goes idle.
+    Nothing here is resumable mid-chunk, so a job found `running` at startup is
+    marked `interrupted` rather than left looking alive forever. Whatever
+    chunks did land are already in the review batch.
+    """
+
+    __tablename__ = "llm_jobs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # llm | scrape. Both are "work too long for a request, watched from a
+    # browser", and both need the same progress, cancel and reap handling, so
+    # they share a table rather than duplicating it.
+    kind: Mapped[str] = mapped_column(String(10), default="llm", index=True)
+    tache: Mapped[int] = mapped_column(Integer)
+    task: Mapped[str] = mapped_column(String(20))        # theme|abstract|core_subject
+    provider: Mapped[str] = mapped_column(String(20))
+    model: Mapped[str] = mapped_column(String(80))
+    chunk: Mapped[int] = mapped_column(Integer, default=20)
+    # how the questions were chosen, kept so a run can be explained later
+    scope: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    # queued | running | done | failed | cancelled | interrupted
+    status: Mapped[str] = mapped_column(String(20), default="queued", index=True)
+    total_rows: Mapped[int] = mapped_column(Integer, default=0)
+    total_chunks: Mapped[int] = mapped_column(Integer, default=0)
+    done_chunks: Mapped[int] = mapped_column(Integer, default=0)
+    answered: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # the review batch this run filled, created up front so partial results are
+    # still reviewable if the job dies
+    batch_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("review_batches.id", ondelete="SET NULL"), nullable=True)
+
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True),
+                                                    default=utcnow)
+    finished_at: Mapped[Optional[dt.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
+
 class ReviewBatch(Base):
     __tablename__ = "review_batches"
 

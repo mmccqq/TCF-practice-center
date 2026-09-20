@@ -1,10 +1,22 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { adminCompare, adminCreateBatch } from '../../lib/api'
+import { Link, useSearchParams } from 'react-router-dom'
+import { adminBatchStats, adminCompare, adminCreateBatch } from '../../lib/api'
 import { readJsonl } from '../../lib/jsonl'
 import { TacheTabs } from './AdminLayout'
 
 export default function Compare() {
+  const [params] = useSearchParams()
+  const batchId = params.get('batch')
+
+  // a compare job's batch already holds both models' answers, so its analysis
+  // is read from the batch rather than from files
+  const { data: stats } = useQuery({
+    queryKey: ['admin-batch-stats', batchId],
+    queryFn: () => adminBatchStats(batchId),
+    enabled: !!batchId,
+  })
+
   const [tache, setTache] = useState(2)
   const [runs, setRuns] = useState({})      // name -> rows
   const [result, setResult] = useState(null)
@@ -48,6 +60,88 @@ export default function Compare() {
     },
     onError: (e) => setError(e.message),
   })
+
+  if (batchId && stats) {
+    const pct = Math.round(stats.agreement * 100)
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-4 rounded-lg border-2
+                        border-sky-500 bg-white p-4">
+          <div>
+            <p className="text-3xl font-bold">{pct}%</p>
+            <p className="text-xs text-slate-500">agreement on {stats.field}</p>
+          </div>
+          <div className="text-sm text-slate-600">
+            <p className="font-medium">{stats.name}</p>
+            <p>{stats.runs.join(' vs ')} · {stats.compared} questions compared</p>
+            <p>{stats.agreed} agreed · <strong>{stats.disagreed} disagreed</strong></p>
+          </div>
+          <Link
+            to={`/admin/reviews?batch=${stats.id}`}
+            className="ml-auto rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white"
+          >
+            Review and apply &rarr;
+          </Link>
+        </div>
+
+        {/* the thing that removes a whole pass: the agreed answers are in this
+            same batch, so accepting them and adjudicating the rest is one
+            apply, not "load one model then load the disagreements" */}
+        <p className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+          All {stats.items} answers are in one batch — the {stats.agreed} both models
+          agreed on and the {stats.disagreed} they split on. In Review, “Accept where
+          the runs agree” takes the first group, you settle the second, and a single
+          Apply writes them all.
+        </p>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <section className="rounded-lg border border-slate-200 bg-white p-4">
+            <h3 className="text-sm font-semibold">What they disagree about</h3>
+            <p className="text-xs text-slate-500">
+              each pair of answers the runs split on, and how often
+            </p>
+            <ul className="mt-2 space-y-1 text-sm">
+              {stats.label_pairs.slice(0, 12).map((x) => (
+                <li key={x.pair} className="flex gap-2">
+                  <span className="w-8 shrink-0 text-right text-slate-400">{x.count}</span>
+                  <span>{x.pair}</span>
+                </li>
+              ))}
+              {stats.label_pairs.length === 0 && (
+                <li className="text-slate-500">nothing — the runs agreed throughout</li>
+              )}
+            </ul>
+          </section>
+          <section className="rounded-lg border border-slate-200 bg-white p-4">
+            <h3 className="text-sm font-semibold">Most contested labels</h3>
+            <p className="text-xs text-slate-500">
+              How many disagreements each label took part in. A label near the top is
+              one whose boundary against a neighbour is unclear.
+            </p>
+            {stats.contested_labels[0]?.count === 1 ? (
+              <p className="mt-2 text-sm text-slate-500">
+                Every label here appears once — {stats.disagreed} disagreement
+                {stats.disagreed === 1 ? '' : 's'} is too few to show a pattern.
+              </p>
+            ) : (
+              <ul className="mt-2 space-y-1 text-sm">
+                {stats.contested_labels.slice(0, 12).map((l) => (
+                  <li key={l.label} className="flex gap-2">
+                    <span className="w-8 shrink-0 text-right text-slate-400">{l.count}</span>
+                    <span>{l.label}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+
+        <Link to="/admin/compare" className="inline-block text-sm text-sky-700 hover:underline">
+          &larr; compare uploaded files instead
+        </Link>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-4">

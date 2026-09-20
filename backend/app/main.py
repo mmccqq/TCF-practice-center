@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import get_settings
 from .routers import progress as progress_router
 from .routers import admin as admin_router
+from .routers import admin_jobs as admin_jobs_router
 from .routers import admin_review as admin_review_router
 from .routers import auth as auth_router
 from .routers import questions as questions_router
@@ -20,6 +21,12 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # a job cannot outlive the process that runs it, so anything still marked
+    # running belongs to a process that is gone
+    from .llm_runner import reap_stale_jobs
+    n = reap_stale_jobs()
+    if n:
+        print(f"marked {n} interrupted job(s) left by a previous process")
     # Deliberately does NOT call Base.metadata.create_all().
     #
     # Alembic owns the schema now. create_all() creates every table the models
@@ -53,6 +60,7 @@ app.include_router(questions_router.router)
 app.include_router(progress_router.router)
 app.include_router(admin_router.router)
 app.include_router(admin_review_router.router)
+app.include_router(admin_jobs_router.router)
 app.include_router(auth_router.router)
 
 

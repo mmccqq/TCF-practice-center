@@ -105,6 +105,25 @@ export const adminApplyBatch = (id) =>
   api(`/api/admin/reviews/${id}/apply`, { method: 'POST', body: {}, auth: true })
 export const adminDeleteBatch = (id) =>
   api(`/api/admin/reviews/${id}`, { method: 'DELETE', auth: true })
+export const adminDecideAgreed = (id) =>
+  api(`/api/admin/reviews/${id}/decide-agreed`, { method: 'POST', body: {}, auth: true })
+
+// running llm.py on the server, importing scraper output, exporting questions
+export const adminLlm = () => adminGet('llm')
+export const adminJobs = () => adminGet('jobs')
+export const adminCreateJob = (body) =>
+  api('/api/admin/jobs', { method: 'POST', body, auth: true })
+export const adminCancelJob = (id) =>
+  api(`/api/admin/jobs/${id}/cancel`, { method: 'POST', body: {}, auth: true })
+export const adminScopePreview = (params) => adminGet('questions/preview', params)
+export const adminScrape = (sources) =>
+  api('/api/admin/scrape', { method: 'POST', body: { sources }, auth: true })
+export const adminImport = (body) =>
+  api('/api/admin/import', { method: 'POST', body, auth: true })
+export const adminExport = (params) => adminGet('export', params)
+
+export const adminBatchStats = (id) => adminGet(`reviews/${id}/stats`)
+
 export const adminCompare = (body) =>
   api('/api/admin/compare', { method: 'POST', body, auth: true })
 export const signup = (body) => api('/api/auth/signup', { method: 'POST', body })

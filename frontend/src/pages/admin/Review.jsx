@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   adminApplyBatch, adminBatch, adminBatches, adminCreateBatch,
   adminCreateSubject, adminCreateTheme, adminDecide, adminDecideAll,
-  adminDeleteBatch, adminVocabulary, invalidatePublic,
+  adminDecideAgreed, adminDeleteBatch, adminVocabulary, invalidatePublic,
 } from '../../lib/api'
 import { readJsonl } from '../../lib/jsonl'
 
@@ -15,22 +16,30 @@ function Upload({ onDone, onError }) {
       onSubmit={async (e) => {
         e.preventDefault()
         const form = new FormData(e.target)
-        const file = form.get('file')
-        if (!file?.size) return
+        const files = form.getAll('file').filter((f) => f?.size)
+        if (!files.length) return
         setBusy(true)
         onError('')
         try {
-          const { rows, errors } = await readJsonl(file)
-          if (errors.length) {
-            throw new Error(`could not parse line${errors.length > 1 ? 's' : ''} `
-                            + errors.slice(0, 5).join(', ')
-                            + (errors.length > 5 ? `… (${errors.length} total)` : ''))
+          // several files become one batch keyed by run, so every question
+          // carries every model's answer - that is what makes "accept what
+          // they agree on" possible and removes the separate compare pass
+          const runs = {}
+          for (const file of files) {
+            const { rows, errors } = await readJsonl(file)
+            if (errors.length) {
+              throw new Error(`${file.name}: could not parse line`
+                              + `${errors.length > 1 ? 's' : ''} `
+                              + errors.slice(0, 5).join(', '))
+            }
+            if (!rows.length) throw new Error(`${file.name} has no rows`)
+            runs[rows.find((r) => r.model)?.model
+                 || file.name.replace(/\.jsonl?$/, '')] = rows
           }
-          if (!rows.length) throw new Error('no rows in that file')
           const res = await adminCreateBatch({
-            name: String(form.get('name') || file.name),
+            name: String(form.get('name') || Object.keys(runs).join(' vs ')),
             tache: Number(form.get('tache')),
-            rows,
+            runs,
           })
           e.target.reset()
           onDone(res)
@@ -42,8 +51,10 @@ function Upload({ onDone, onError }) {
       }}
     >
       <label className="text-sm">
-        <span className="block text-xs text-slate-500">llm.py or compare.py output (.jsonl)</span>
-        <input type="file" name="file" accept=".jsonl,.json,application/json"
+        <span className="block text-xs text-slate-500">
+          llm.py output (.jsonl) — pick several to review them side by side
+        </span>
+        <input type="file" name="file" multiple accept=".jsonl,.json,application/json"
                className="mt-1 block text-sm" />
       </label>
       <label className="text-sm">
@@ -106,6 +117,17 @@ function Queue({ batchId, onError }) {
 
   // one request, not one per item: a 200-row abstract file is the common case
   // and clicking through it to accept every answer is not review, it is typing
+  const acceptAgreed = useMutation({
+    mutationFn: () => adminDecideAgreed(batchId),
+    onSuccess: (res) => {
+      setBulk({ decided: res.agreed, left_for_you: res.disagreed,
+                already_decided: res.already_decided, agreed: true })
+      qc.invalidateQueries({ queryKey: ['admin-batch', batchId] })
+      qc.invalidateQueries({ queryKey: ['admin-batches'] })
+    },
+    onError: (e) => onError(e.message),
+  })
+
   const acceptAll = useMutation({
     mutationFn: (run) => adminDecideAll(batchId, run ? { run } : {}),
     onSuccess: (res) => {
@@ -177,6 +199,16 @@ function Queue({ batchId, onError }) {
           undecided only
         </label>
         <div className="ml-auto flex flex-wrap items-center gap-2">
+          {remaining > 0 && runs.length > 1 && (
+            <button
+              onClick={() => acceptAgreed.mutate()}
+              disabled={acceptAgreed.isPending}
+              className="rounded-md border border-emerald-400 bg-emerald-50 px-3 py-1.5
+                         font-medium text-emerald-900 disabled:opacity-50"
+            >
+              {acceptAgreed.isPending ? 'Accepting…' : 'Accept where the runs agree'}
+            </button>
+          )}
           {remaining > 0 && (
             runs.length <= 1 ? (
               <button
@@ -211,9 +243,10 @@ function Queue({ batchId, onError }) {
 
       {bulk && (
         <p className="rounded-lg border border-slate-300 bg-slate-50 p-3 text-sm">
-          Accepted {bulk.decided}.
+          Accepted {bulk.decided}
+          {bulk.agreed && ' where every run said the same thing'}.
           {bulk.left_for_you > 0 && (
-            <> {bulk.left_for_you} still need you — those have more than one answer.</>
+            <> {bulk.left_for_you} still need you — the runs disagree there.</>
           )}
           {bulk.already_decided > 0 && (
             <> {bulk.already_decided} you had already decided were left alone.</>
@@ -378,7 +411,17 @@ function Queue({ batchId, onError }) {
 }
 
 export default function Review() {
-  const [open, setOpen] = useState(null)
+  const [params] = useSearchParams()
+  const [open, setOpen] = useState(() => {
+    const id = Number(params.get('batch'))
+    return id || null
+  })
+  // a finished job links straight here with its batch, so arriving should show
+  // that batch open rather than a list to hunt through
+  useEffect(() => {
+    const id = Number(params.get('batch'))
+    if (id) setOpen(id)
+  }, [params])
   const [error, setError] = useState('')
   const qc = useQueryClient()
   const { data: batches } = useQuery({ queryKey: ['admin-batches'], queryFn: adminBatches })
