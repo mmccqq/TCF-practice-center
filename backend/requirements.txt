@@ -19,3 +19,6 @@ requests>=2.32
 beautifulsoup4>=4.12
 # the scrapers ask BeautifulSoup for the lxml tree builder by name
 lxml>=5.2
+# the admin export writes .xlsx; questions_processing/jsonl_to_xlsx.py already
+# uses the same library, so the two produce comparable files
+openpyxl>=3.1

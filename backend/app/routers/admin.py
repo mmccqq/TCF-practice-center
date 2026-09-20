@@ -16,7 +16,13 @@ from __future__ import annotations
 
 from typing import Optional
 
+import io
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import StreamingResponse
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font
+from openpyxl.utils import get_column_letter
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -263,21 +269,12 @@ def _question_row(f: Fingerprint, theme: Optional[Theme],
     }
 
 
-@router.get("/questions")
-def list_questions(
-    tache: int = Query(2, ge=2, le=3),
-    q: Optional[str] = None,
-    theme_id: Optional[int] = None,
-    core_subject_id: Optional[int] = None,
-    unlabelled: Optional[str] = Query(None, pattern="^(theme|abstract|core_subject)$"),
-    inconsistent: bool = Query(False,
-                               description="only questions whose core subject "
-                                           "belongs to a different theme"),
-    page: int = Query(1, ge=1),
-    per_page: int = Query(50, ge=1, le=200),
-    db: Session = Depends(get_db),
-) -> dict:
-    """Fingerprints with their labels - one row per question, not per month."""
+def _question_where(tache, q, theme_id, core_subject_id, unlabelled, inconsistent):
+    """The filter behind both the page and its "select all matching" list.
+
+    Shared so the two cannot drift: a button that claims to select what the
+    page is showing has to mean the same thing by "showing".
+    """
     where = [Fingerprint.tache == tache]
     if q:
         where.append(or_(Fingerprint.text.ilike(f"%{q}%"),
@@ -297,6 +294,142 @@ def list_questions(
         where.append(Fingerprint.core_subject_id.is_(None))
     elif unlabelled == "abstract":
         where.append(Fingerprint.abstract.is_(None))
+    return where
+
+
+@router.get("/questions/ids")
+def question_ids(
+    tache: int = Query(2, ge=2, le=3),
+    q: Optional[str] = None,
+    theme_id: Optional[int] = None,
+    core_subject_id: Optional[int] = None,
+    unlabelled: Optional[str] = Query(None, pattern="^(theme|abstract|core_subject)$"),
+    inconsistent: bool = Query(False),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Every question id matching the filter, for "select all matching".
+
+    Capped at the same ceiling a job is: selecting 5,000 questions and then
+    being told the run will only cover 600 would be a worse experience than
+    being told now. `total` is the unclipped count, so the UI can say so.
+    """
+    from ..llm_runner import MAX_ROWS
+
+    where = _question_where(tache, q, theme_id, core_subject_id, unlabelled,
+                            inconsistent)
+    base = (select(Fingerprint.id)
+            .outerjoin(CoreSubject, CoreSubject.id == Fingerprint.core_subject_id)
+            .where(*where))
+    total = db.scalar(select(func.count()).select_from(Fingerprint)
+                      .outerjoin(CoreSubject,
+                                 CoreSubject.id == Fingerprint.core_subject_id)
+                      .where(*where)) or 0
+    ids = [i for (i,) in db.execute(
+        base.order_by(Fingerprint.months_seen.desc(), Fingerprint.id.desc())
+            .limit(MAX_ROWS)).all()]
+    return {"ids": ids, "total": total, "cap": MAX_ROWS, "capped": total > len(ids)}
+
+
+EXPORT_COLUMNS = [
+    ("id", 8), ("tache", 6), ("theme", 24), ("core_subject", 24),
+    ("abstract", 34), ("text", 90), ("months_seen", 12),
+    ("total_sightings", 14), ("first_seen", 11), ("last_seen", 11),
+    ("fingerprint", 18),
+]
+
+
+@router.get("/questions/export")
+def export_questions(
+    tache: int = Query(2, ge=2, le=3),
+    q: Optional[str] = None,
+    theme_id: Optional[int] = None,
+    core_subject_id: Optional[int] = None,
+    unlabelled: Optional[str] = Query(None, pattern="^(theme|abstract|core_subject)$"),
+    inconsistent: bool = Query(False),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    """Every field of every question the filter matches, as a spreadsheet.
+
+    Not capped and not paginated: an export is free and a partial one is a
+    trap. Built server-side because the data is already here - shipping JSON to
+    the browser and converting it there would mean a second definition of what
+    a question's fields are.
+
+    The labels are the resolved names, not the foreign keys, because the point
+    of the file is to be read.
+    """
+    where = _question_where(tache, q, theme_id, core_subject_id, unlabelled,
+                            inconsistent)
+    rows = db.execute(
+        select(Fingerprint, Theme.name, CoreSubject.name)
+        .outerjoin(Theme, Theme.id == Fingerprint.theme_id)
+        .outerjoin(CoreSubject, CoreSubject.id == Fingerprint.core_subject_id)
+        .where(*where)
+        .order_by(Fingerprint.months_seen.desc(), Fingerprint.id.desc())).all()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = f"Task {tache}"
+
+    ws.append([name for name, _ in EXPORT_COLUMNS])
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(vertical="top")
+    # the header stays put while scrolling a few thousand rows, and a filter
+    # row makes the file usable without anyone writing a formula
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(EXPORT_COLUMNS))}1"
+
+    for f, theme, core_subject in rows:
+        ws.append([
+            f.id, f.tache, theme, core_subject, f.abstract, f.text,
+            f.months_seen, f.total_sightings, f.first_seen, f.last_seen,
+            # the hash is 64 characters of noise in a spreadsheet; the first 12
+            # is enough to match rows against another export
+            (f.fingerprint or "")[:12],
+        ])
+
+    for i, (_name, width) in enumerate(EXPORT_COLUMNS, 1):
+        ws.column_dimensions[get_column_letter(i)].width = width
+    # the question text is a paragraph; without wrapping every row is one line
+    # running off the screen
+    for row in ws.iter_rows(min_row=2, min_col=5, max_col=6):
+        for cell in row:
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    bits = [str(len(rows)), f"tache{tache}"]
+    if unlabelled:
+        bits.append(f"no_{unlabelled}")
+    if inconsistent:
+        bits.append("mismatched")
+    name = f"questions_{'_'.join(bits)}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@router.get("/questions")
+def list_questions(
+    tache: int = Query(2, ge=2, le=3),
+    q: Optional[str] = None,
+    theme_id: Optional[int] = None,
+    core_subject_id: Optional[int] = None,
+    unlabelled: Optional[str] = Query(None, pattern="^(theme|abstract|core_subject)$"),
+    inconsistent: bool = Query(False,
+                               description="only questions whose core subject "
+                                           "belongs to a different theme"),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Fingerprints with their labels - one row per question, not per month."""
+    where = _question_where(tache, q, theme_id, core_subject_id, unlabelled,
+                            inconsistent)
 
     # counted through the same joins as the rows. A filter that mentions
     # core_subjects without joining it turns the count into a cartesian product

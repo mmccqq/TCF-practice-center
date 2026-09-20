@@ -87,6 +87,7 @@ export const adminMergeSubject = (id, intoId) =>
   api(`/api/admin/core-subjects/${id}/merge`, { method: 'POST', body: { into_id: intoId }, auth: true })
 
 export const adminQuestions = (params) => adminGet('questions', params)
+export const adminQuestionIds = (params) => adminGet('questions/ids', params)
 export const adminSetLabels = (fId, body) =>
   api(`/api/admin/questions/${fId}`, { method: 'PATCH', body, auth: true })
 export const adminBulkLabel = (body) =>
@@ -115,12 +116,36 @@ export const adminCreateJob = (body) =>
   api('/api/admin/jobs', { method: 'POST', body, auth: true })
 export const adminCancelJob = (id) =>
   api(`/api/admin/jobs/${id}/cancel`, { method: 'POST', body: {}, auth: true })
-export const adminScopePreview = (params) => adminGet('questions/preview', params)
 export const adminScrape = (sources) =>
   api('/api/admin/scrape', { method: 'POST', body: { sources }, auth: true })
-export const adminImport = (body) =>
-  api('/api/admin/import', { method: 'POST', body, auth: true })
-export const adminExport = (params) => adminGet('export', params)
+/**
+ * Download a file from an authenticated endpoint.
+ *
+ * Not a plain <a href>: these routes need the bearer token, and a link cannot
+ * carry a header. So it is fetched as a blob and handed to the browser through
+ * an object URL. The filename comes from Content-Disposition, so the server
+ * decides what the file is called.
+ */
+export async function adminDownload(path, params) {
+  const res = await fetch(`${BASE}/api/admin/${path}?${new URLSearchParams(params)}`, {
+    headers: { Authorization: `Bearer ${tokenStore.get()}` },
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    let detail
+    try { detail = JSON.parse(text)?.detail } catch { detail = null }
+    throw new Error(detail || `download failed (${res.status})`)
+  }
+  const disposition = res.headers.get('Content-Disposition') || ''
+  const name = /filename="?([^"]+)"?/.exec(disposition)?.[1] || 'export.xlsx'
+  const url = URL.createObjectURL(await res.blob())
+  const a = Object.assign(document.createElement('a'), { href: url, download: name })
+  a.click()
+  URL.revokeObjectURL(url)
+  return name
+}
+
+export const adminExport = (params) => adminDownload('questions/export', params)
 
 export const adminBatchStats = (id) => adminGet(`reviews/${id}/stats`)
 

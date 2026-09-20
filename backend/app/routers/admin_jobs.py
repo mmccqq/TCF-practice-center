@@ -193,7 +193,13 @@ class ImportIn(BaseModel):
 
 @router.post("/import")
 def import_scraped(payload: ImportIn, db: Session = Depends(get_db)) -> dict:
-    """Upload parsed scraper output. See load_rows."""
+    """Upload parsed scraper output.
+
+    No longer has a UI - the Data tab's fetch button covers the normal path by
+    downloading and parsing server-side. This stays as the way back in after a
+    parser fix, when the archive has been re-parsed locally and should be
+    pushed without re-downloading it.
+    """
     return load_rows(db, payload.rows, payload.dry_run)
 
 
@@ -341,27 +347,3 @@ def start_scrape(payload: ScrapeIn, admin: User = Depends(current_admin),
     db.commit()
     scrape_runner.start(job.id, payload.sources)
     return _job_row(job)
-
-
-# --------------------------------------------------------------------- export
-
-
-@router.get("/export")
-def export_questions(
-    tache: int = Query(2, ge=2, le=3),
-    unlabelled: Optional[str] = Query(None, pattern="^(theme|abstract|core_subject)$"),
-    theme_id: Optional[int] = None,
-    limit: int = Query(0, ge=0),
-    db: Session = Depends(get_db),
-) -> list[dict]:
-    """Questions as JSONL rows, for anything still run locally.
-
-    Shaped exactly like export_questions.py's output - `id` and `text`, plus
-    `theme` when there is one - so a downloaded file feeds llm.py unchanged.
-    """
-    scope = {k: v for k, v in (("limit", limit or None),
-                               ("theme_id", theme_id),
-                               ("unlabelled", unlabelled)) if v}
-    rows = llm_runner.rows_for(db, tache, unlabelled or "theme", scope)
-    return [{"id": int(r["id"]), "text": r["text"],
-             **({"theme": r["theme"]} if r["theme"] else {})} for r in rows]

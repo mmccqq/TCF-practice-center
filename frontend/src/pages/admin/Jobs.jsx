@@ -1,28 +1,42 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import {
-  adminCancelJob, adminCreateJob, adminJobs, adminLlm, adminScopePreview,
-  adminVocabulary,
-} from '../../lib/api'
-import { TacheTabs } from './AdminLayout'
+import { adminCancelJob, adminJobs } from '../../lib/api'
 
-const TASKS = ['theme', 'abstract', 'core_subject']
+// Jobs are started from the Labelling tab, where the questions are chosen.
+// This tab watches them: progress, timings, and where a finished one leads.
 const DONE = ['done', 'failed', 'cancelled', 'interrupted']
 
-export default function Jobs() {
-  const [form, setForm] = useState({
-    tache: 2, task: 'theme', provider: '', model: '', chunk: 20, limit: '',
-    theme_id: '', api_key: '',
-  })
-  const [error, setError] = useState('')
-  const qc = useQueryClient()
+/**
+ * Parse a timestamp the API returned.
+ *
+ * Both databases store UTC, but only one says so: Postgres serialises
+ * `2026-09-20T19:39:32+00:00` while SQLite gives `2026-09-20T19:39:32` with no
+ * zone, which `new Date()` would read as local time. Assume UTC when the
+ * marker is missing, or the same job would display hours apart depending on
+ * which database served it.
+ */
+function parseUtc(iso) {
+  if (!iso) return null
+  const zoned = /[Zz]$|[+-]\d\d:?\d\d$/.test(iso)
+  const d = new Date(zoned ? iso : `${iso}Z`)
+  return Number.isNaN(d.getTime()) ? null : d
+}
 
-  const { data: caps } = useQuery({ queryKey: ['admin-llm'], queryFn: adminLlm })
-  const { data: vocab } = useQuery({
-    queryKey: ['admin-vocabulary', form.tache],
-    queryFn: () => adminVocabulary({ tache: form.tache }),
-  })
+const clock = (d) =>
+  d ? d.toLocaleString(undefined, { month: 'short', day: 'numeric',
+                                    hour: '2-digit', minute: '2-digit' }) : ''
+
+function elapsed(from, to) {
+  if (!from) return ''
+  const secs = Math.max(0, Math.round(((to ?? new Date()) - from) / 1000))
+  if (secs < 60) return `${secs}s`
+  const mins = Math.floor(secs / 60)
+  return mins < 60 ? `${mins}m ${secs % 60}s`
+                   : `${Math.floor(mins / 60)}h ${mins % 60}m`
+}
+
+export default function Jobs() {
+  const qc = useQueryClient()
   const { data: jobs } = useQuery({
     queryKey: ['admin-jobs'],
     queryFn: adminJobs,
@@ -31,147 +45,8 @@ export default function Jobs() {
       (q.state.data ?? []).some((j) => !DONE.includes(j.status)) ? 3000 : false,
   })
 
-  const scope = {
-    tache: form.tache, task: form.task,
-    ...(form.theme_id ? { theme_id: form.theme_id } : {}),
-    ...(form.limit ? { limit: form.limit } : {}),
-  }
-  const { data: preview } = useQuery({
-    queryKey: ['admin-scope', scope],
-    queryFn: () => adminScopePreview(scope),
-  })
-
-  const create = useMutation({
-    mutationFn: () => adminCreateJob({
-      tache: form.tache, task: form.task, provider: form.provider,
-      model: form.model || undefined, chunk: Number(form.chunk),
-      limit: form.limit ? Number(form.limit) : undefined,
-      theme_id: form.theme_id ? Number(form.theme_id) : undefined,
-      api_key: form.api_key.trim() || undefined,
-    }),
-    onMutate: () => setError(''),
-    onError: (e) => setError(e.message),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-jobs'] }),
-  })
-
-  const providers = caps?.providers ?? []
-  const set = (patch) => setForm((f) => ({ ...f, ...patch }))
-  const chosen = providers.find((p) => p.name === form.provider)
-  // a key from this form counts as much as one in the server's environment
-  const haveKey = !!form.api_key.trim() || !!chosen?.configured
-
   return (
     <div className="space-y-4">
-      <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
-        <div className="flex flex-wrap items-end gap-3">
-          <TacheTabs tache={form.tache} onChange={(t) => set({ tache: t, theme_id: '' })} />
-          <label className="text-sm">
-            <span className="block text-xs text-slate-500">Task</span>
-            <select value={form.task} onChange={(e) => set({ task: e.target.value })}
-                    className="mt-1 rounded-md border border-slate-300 bg-white px-2 py-1">
-              {TASKS.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </label>
-          <label className="text-sm">
-            <span className="block text-xs text-slate-500">Provider</span>
-            <select value={form.provider} onChange={(e) => set({ provider: e.target.value, model: '' })}
-                    className="mt-1 rounded-md border border-slate-300 bg-white px-2 py-1">
-              <option value="">choose…</option>
-              {/* every provider is selectable now: a key can come from this
-                  form, so one missing from the server is not disqualifying */}
-              {providers.map((p) => (
-                <option key={p.name} value={p.name}>
-                  {p.name}{p.configured ? ' — key on server' : ''}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-sm">
-            <span className="block text-xs text-slate-500">Model</span>
-            <input
-              value={form.model}
-              onChange={(e) => set({ model: e.target.value })}
-              placeholder={chosen?.default_model || 'default'}
-              className="mt-1 w-48 rounded-md border border-slate-300 px-2 py-1"
-            />
-          </label>
-          <label className="text-sm">
-            <span className="block text-xs text-slate-500">Chunk</span>
-            <input type="number" min="1" max="100" value={form.chunk}
-                   onChange={(e) => set({ chunk: e.target.value })}
-                   className="mt-1 w-20 rounded-md border border-slate-300 px-2 py-1" />
-          </label>
-          <label className="text-sm">
-            <span className="block text-xs text-slate-500">Limit</span>
-            <input type="number" min="1" value={form.limit} placeholder="all"
-                   onChange={(e) => set({ limit: e.target.value })}
-                   className="mt-1 w-20 rounded-md border border-slate-300 px-2 py-1" />
-          </label>
-          <label className="text-sm">
-            <span className="block text-xs text-slate-500">
-              API key{chosen && chosen.configured ? ' (server has one)' : ''}
-            </span>
-            {/* sent per run and used for that run only - never stored on the
-                job, logged, or returned by any endpoint. type=password so it
-                does not sit on screen or in an autofill history. */}
-            <input
-              type="password"
-              value={form.api_key}
-              onChange={(e) => set({ api_key: e.target.value })}
-              autoComplete="off"
-              placeholder={chosen?.configured ? 'leave blank to use the server key'
-                                              : (chosen?.key_env?.[0] || 'sk-…')}
-              className="mt-1 w-56 rounded-md border border-slate-300 px-2 py-1"
-            />
-          </label>
-          {form.task === 'core_subject' && (
-            <label className="text-sm">
-              <span className="block text-xs text-slate-500">Theme</span>
-              <select value={form.theme_id} onChange={(e) => set({ theme_id: e.target.value })}
-                      className="mt-1 rounded-md border border-slate-300 bg-white px-2 py-1">
-                <option value="">every theme</option>
-                {(vocab?.themes ?? []).map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
-              </select>
-            </label>
-          )}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3 text-sm">
-          {/* the size of the run, before any of it is paid for */}
-          <span className="text-slate-600">
-            {preview
-              ? `${preview.rows} question${preview.rows === 1 ? '' : 's'} · `
-                + `${Math.ceil(preview.rows / Math.max(1, Number(form.chunk)))} request(s)`
-              : '…'}
-            {/* `preview?.rows === preview?.cap` looks safe and is not: before
-                the query resolves both sides are undefined, the comparison is
-                true, and reading preview.cap throws. Guard on the object. */}
-            {preview && preview.rows === preview.cap && ` · capped at ${preview.cap}`}
-          </span>
-          <button
-            onClick={() => create.mutate()}
-            disabled={!form.provider || !haveKey || !preview?.rows || create.isPending}
-            className="rounded-md bg-slate-900 px-3 py-1.5 font-medium text-white disabled:opacity-40"
-          >
-            {create.isPending ? 'Starting…' : 'Run'}
-          </button>
-          {form.provider && !haveKey && (
-            <span className="text-amber-700">
-              Paste an API key — this server has none for {form.provider}.
-            </span>
-          )}
-        </div>
-        {preview?.sample?.length > 0 && (
-          <ul className="space-y-0.5 text-xs text-slate-400">
-            {preview.sample.map((t, i) => <li key={i}>{t}…</li>)}
-          </ul>
-        )}
-      </div>
-
-      {error && <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p>}
-
       <ul className="space-y-2">
         {(jobs ?? []).map((j) => {
           const pct = j.total_chunks ? Math.round((j.done_chunks / j.total_chunks) * 100) : 0
@@ -229,7 +104,22 @@ export default function Jobs() {
                   <div className="h-full bg-sky-500 transition-all" style={{ width: `${pct}%` }} />
                 </div>
               )}
-              {j.error && <p className="mt-1 text-xs text-amber-800">{j.error}</p>}
+              {(() => {
+                const started = parseUtc(j.created_at)
+                const ended = parseUtc(j.finished_at)
+                return (
+                  <p className="mt-1 text-xs text-slate-400">
+                    started {clock(started)}
+                    {ended ? ` · finished ${clock(ended)} · took ${elapsed(started, ended)}`
+                           // no end time yet, so count up from the start - the
+                           // list is already polling, so this ticks on its own
+                           : ` · running ${elapsed(started)}`}
+                  </p>
+                )
+              })()}
+              {j.error && (
+                <pre className="mt-1 whitespace-pre-wrap text-xs text-amber-800">{j.error}</pre>
+              )}
             </li>
           )
         })}
@@ -237,7 +127,8 @@ export default function Jobs() {
 
       {jobs?.length === 0 && (
         <p className="rounded-lg border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
-          No runs yet. A finished run lands in Review as a batch.
+          No runs yet. Start one from the Labelling tab: pick some questions,
+          then “Run a job”.
         </p>
       )}
     </div>

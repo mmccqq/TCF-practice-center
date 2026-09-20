@@ -132,7 +132,10 @@ def rows_for(db, tache: int, task_name: str, scope: dict) -> list[dict]:
     # an explicit selection wins over every filter: the admin ticked those rows
     # and meant them, including ones that already carry a label
     if scope.get("f_ids"):
-        rows = db.execute(q.where(Fingerprint.id.in_(scope["f_ids"]))).all()
+        # the ceiling applies here too: a selection is a filter by another name,
+        # and MAX_ROWS exists to bound what one job can spend
+        chosen = list(scope["f_ids"])[:MAX_ROWS]
+        rows = db.execute(q.where(Fingerprint.id.in_(chosen))).all()
         return [{"id": str(f.id), "text": f.text, "theme": theme}
                 for f, theme in rows
                 if task_name != "core_subject" or f.theme_id is not None]

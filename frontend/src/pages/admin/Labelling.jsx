@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import {
-  adminBulkLabel, adminQuestions, adminSetLabels, adminVocabulary,
-  invalidatePublic,
+  adminBulkLabel, adminExport, adminQuestionIds, adminQuestions, adminSetLabels,
+  adminVocabulary, invalidatePublic,
 } from '../../lib/api'
 import { TacheTabs } from './AdminLayout'
 import RunJobDialog from './RunJobDialog'
@@ -108,6 +108,31 @@ export default function Labelling() {
     return next
   })
 
+  // the same filter the page is showing, every field, every matching row - not
+  // capped, because an export costs nothing and a partial one is a trap. The
+  // spreadsheet is built server-side and arrives named.
+  const exportAll = useMutation({
+    mutationFn: () => adminExport(params),
+    onMutate: () => setError(''),
+    onError: (e) => setError(e.message),
+  })
+
+  // everything the filter matches, not just the page. Fetched on demand rather
+  // than with the list: it is a few hundred integers nobody needs until they
+  // ask for them.
+  const selectMatching = useMutation({
+    mutationFn: () => adminQuestionIds(params),
+    onMutate: () => setError(''),
+    onError: (e) => setError(e.message),
+    onSuccess: (res) => {
+      setPicked(new Set(res.ids))
+      if (res.capped) {
+        setError(`Selected the first ${res.ids.length} of ${res.total} — that is `
+                 + `the most one job may cover. Run these, then select again.`)
+      }
+    },
+  })
+
   const pages = data ? Math.max(1, Math.ceil(data.total / PER_PAGE)) : 1
 
   return (
@@ -189,6 +214,25 @@ export default function Labelling() {
           >
             {allPicked ? 'Clear page' : `Select all ${pageIds.length}`}
           </button>
+          {data && data.total > pageIds.length && (
+            <button
+              onClick={() => selectMatching.mutate()}
+              disabled={selectMatching.isPending}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-40"
+            >
+              {selectMatching.isPending
+                ? 'Selecting…'
+                : `Select all ${data.total.toLocaleString()} matching`}
+            </button>
+          )}
+          <button
+            onClick={() => exportAll.mutate()}
+            disabled={!data?.total || exportAll.isPending}
+            title="Download every matching question as a spreadsheet, all fields"
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-40"
+          >
+            {exportAll.isPending ? 'Preparing…' : 'Export .xlsx'}
+          </button>
           <button
             onClick={() => setRunning(true)}
             disabled={!picked.size}
@@ -208,6 +252,11 @@ export default function Labelling() {
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-sky-300
                         bg-sky-50 p-3 text-sm">
           <strong>{picked.size} selected</strong>
+          {picked.size > pageIds.filter((id) => picked.has(id)).length && (
+            <span className="text-slate-500">
+              ({picked.size - pageIds.filter((id) => picked.has(id)).length} on other pages)
+            </span>
+          )}
           <span className="text-slate-600">assign theme:</span>
           <select
             defaultValue=""
