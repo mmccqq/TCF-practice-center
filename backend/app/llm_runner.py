@@ -107,7 +107,7 @@ def available() -> dict:
             "configured": any(os.environ.get(n) for n in names if n),
             "key_env": [n for n in names if n],
         })
-    return {"providers": out, "tasks": sorted(TASKS)}
+    return {"providers": out, "tasks": sorted(TASKS), "max_rows": MAX_ROWS}
 
 
 def reap_stale_jobs() -> int:

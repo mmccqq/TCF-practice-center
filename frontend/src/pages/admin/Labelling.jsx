@@ -124,13 +124,9 @@ export default function Labelling() {
     mutationFn: () => adminQuestionIds(params),
     onMutate: () => setError(''),
     onError: (e) => setError(e.message),
-    onSuccess: (res) => {
-      setPicked(new Set(res.ids))
-      if (res.capped) {
-        setError(`Selected the first ${res.ids.length} of ${res.total} — that is `
-                 + `the most one job may cover. Run these, then select again.`)
-      }
-    },
+    // no ceiling here: a selection feeds bulk labelling as well as jobs, and
+    // only the job has a cost worth bounding. The dialog raises it instead.
+    onSuccess: (res) => setPicked(new Set(res.ids)),
   })
 
   const pages = data ? Math.max(1, Math.ceil(data.total / PER_PAGE)) : 1
@@ -240,7 +236,7 @@ export default function Labelling() {
             className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white
                        disabled:opacity-40"
           >
-            Run a job{picked.size ? ` (${picked.size})` : ''}
+            Run a job
           </button>
         </div>
       </div>

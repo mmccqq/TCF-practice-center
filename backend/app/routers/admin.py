@@ -309,25 +309,19 @@ def question_ids(
 ) -> dict:
     """Every question id matching the filter, for "select all matching".
 
-    Capped at the same ceiling a job is: selecting 5,000 questions and then
-    being told the run will only cover 600 would be a worse experience than
-    being told now. `total` is the unclipped count, so the UI can say so.
+    Uncapped. A selection is not a job: assigning a theme to 1,260 questions
+    costs nothing, so clipping the list here would limit the free operation to
+    protect against the expensive one. The job ceiling is applied when a job is
+    created, and the dialog says so before anything is spent.
     """
-    from ..llm_runner import MAX_ROWS
-
     where = _question_where(tache, q, theme_id, core_subject_id, unlabelled,
                             inconsistent)
-    base = (select(Fingerprint.id)
-            .outerjoin(CoreSubject, CoreSubject.id == Fingerprint.core_subject_id)
-            .where(*where))
-    total = db.scalar(select(func.count()).select_from(Fingerprint)
-                      .outerjoin(CoreSubject,
-                                 CoreSubject.id == Fingerprint.core_subject_id)
-                      .where(*where)) or 0
     ids = [i for (i,) in db.execute(
-        base.order_by(Fingerprint.months_seen.desc(), Fingerprint.id.desc())
-            .limit(MAX_ROWS)).all()]
-    return {"ids": ids, "total": total, "cap": MAX_ROWS, "capped": total > len(ids)}
+        select(Fingerprint.id)
+        .outerjoin(CoreSubject, CoreSubject.id == Fingerprint.core_subject_id)
+        .where(*where)
+        .order_by(Fingerprint.months_seen.desc(), Fingerprint.id.desc())).all()]
+    return {"ids": ids, "total": len(ids)}
 
 
 EXPORT_COLUMNS = [

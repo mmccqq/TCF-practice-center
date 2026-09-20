@@ -19,6 +19,12 @@ export default function RunJobDialog({ tache, task, fIds, onClose }) {
   const { data: caps } = useQuery({ queryKey: ['admin-llm'], queryFn: adminLlm })
   const providers = caps?.providers ?? []
 
+  // the ceiling lives on the server; a job silently covering less than the
+  // selection is the surprise this exists to prevent
+  const cap = caps?.max_rows ?? Infinity
+  const covered = Math.min(fIds.length, cap)
+  const clipped = fIds.length > cap
+
   const [mode, setMode] = useState('review')
   const [chunk, setChunk] = useState(20)
   const [runs, setRuns] = useState([
@@ -58,12 +64,21 @@ export default function RunJobDialog({ tache, task, fIds, onClose }) {
                     bg-slate-900/40 p-4 pt-16">
       <div className="w-full max-w-lg space-y-4 rounded-lg bg-white p-5 shadow-xl">
         <div>
-          <h3 className="font-semibold">Run a job on {fIds.length} question
-            {fIds.length === 1 ? '' : 's'}</h3>
+          <h3 className="font-semibold">Run a job on {covered.toLocaleString()} question
+            {covered === 1 ? '' : 's'}</h3>
           <p className="mt-1 text-sm text-slate-600">
             Task {tache} · {task}
           </p>
         </div>
+
+        {clipped && (
+          <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm
+                        text-amber-900">
+            You selected {fIds.length.toLocaleString()}, and {cap.toLocaleString()} is
+            the most one job may cover. This run takes the first {cap.toLocaleString()};
+            run them, then select the rest.
+          </p>
+        )}
 
         <div className="flex gap-2">
           {[
@@ -126,7 +141,7 @@ export default function RunJobDialog({ tache, task, fIds, onClose }) {
                  onChange={(e) => setChunk(e.target.value)}
                  className="w-20 rounded-md border border-slate-300 px-2 py-1" />
           <span className="text-xs text-slate-500">
-            {Math.ceil(fIds.length / Math.max(1, Number(chunk))) * used.length} request(s)
+            {Math.ceil(covered / Math.max(1, Number(chunk))) * used.length} request(s)
           </span>
         </label>
 
