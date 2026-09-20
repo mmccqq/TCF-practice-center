@@ -25,7 +25,7 @@ function CoreSetCard({ progress }) {
         </span>
       </div>
       <p className="mt-1 max-w-xl text-sm text-slate-600">
-        Prepare the necessary questions to save hundreds of hours practicing a thousand questions.
+        Prepare the core questions less than 100 to save hundreds of hours practicing more than 1,000 questions.
       </p>
       <div className="mt-3 flex flex-wrap items-center gap-3">
         {total > 0 ? (
