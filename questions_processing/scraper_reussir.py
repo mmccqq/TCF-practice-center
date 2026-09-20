@@ -133,22 +133,37 @@ def discover_month_urls(html: str) -> list[str]:
     return [seen[s] for s in sorted(seen, key=sort_key, reverse=True)]
 
 
-def crawl(raw_dir: Path, limit: int | None, delay: float, force: bool) -> None:
+def crawl(raw_dir: Path, limit: int | None, delay: float, force: bool,
+          offline: bool = False) -> None:
     raw_dir.mkdir(parents=True, exist_ok=True)
     session = requests.Session()
     session.headers.update({"User-Agent": USER_AGENT, "Accept-Language": "fr-FR,fr;q=0.9"})
 
     index_path = raw_dir / "_index.html"
-    if force or not index_path.exists():
+    # The index is a listing, not an archive: it gains a link every time a new
+    # month is published, so a cached copy can only ever be out of date - which
+    # is why September's pages were invisible while a 27 August copy sat here.
+    # It is re-fetched every run. The month pages it points at do not change
+    # once published, so those stay cached; --force re-downloads them too.
+    if offline:
+        if not index_path.exists():
+            sys.exit("--offline needs a cached _index.html; run once online first")
+        print(f"using cached {index_path.name}")
+    else:
         print(f"GET {INDEX_URL}")
         index_path.write_text(polite_get(session, INDEX_URL, delay), encoding="utf-8")
+
     urls = discover_month_urls(index_path.read_text(encoding="utf-8"))
-    print(f"discovered {len(urls)} month pages")
+    fresh = [u for u in urls if not (raw_dir / f"{slug_of(u)}.html").exists()]
+    print(f"discovered {len(urls)} month pages, {len(fresh)} not yet downloaded")
 
     for url in urls[:limit]:
         dest = raw_dir / f"{slug_of(url)}.html"
         if dest.exists() and not force:
             print(f"skip  {dest.name} (cached)")
+            continue
+        if offline:
+            print(f"skip  {dest.name} (offline)")
             continue
         print(f"GET   {url}")
         try:
@@ -394,7 +409,9 @@ def main() -> None:
     c.add_argument("--raw-dir", type=Path, default=Path("raw_reussir"))
     c.add_argument("--limit", type=int, default=None, help="only the N newest months")
     c.add_argument("--delay", type=float, default=DELAY_SECONDS)
-    c.add_argument("--force", action="store_true", help="re-download cached pages")
+    c.add_argument("--force", action="store_true", help="re-download cached month pages")
+    c.add_argument("--offline", action="store_true",
+                   help="use the cached index and touch the network for nothing")
 
     p = sub.add_parser("parse", help="extract questions from saved HTML")
     p.add_argument("--raw-dir", type=Path, default=Path("raw_reussir"))
@@ -405,7 +422,7 @@ def main() -> None:
 
     args = ap.parse_args()
     if args.cmd == "crawl":
-        crawl(args.raw_dir, args.limit, args.delay, args.force)
+        crawl(args.raw_dir, args.limit, args.delay, args.force, args.offline)
     elif args.cmd == "parse":
         parse_all(args.raw_dir, args.out_dir)
     else:

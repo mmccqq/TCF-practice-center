@@ -84,6 +84,20 @@ class DecisionIn(BaseModel):
     decision: Optional[str] = None
 
 
+class DecideAllIn(BaseModel):
+    """Take every candidate at once.
+
+    `run` picks which run to believe when items carry several - a comparison
+    batch. Left out, only items with exactly one candidate are decided, which
+    is the common case: a single llm.py output where the whole point is to
+    accept the lot.
+    """
+
+    run: Optional[str] = None
+    # off by default, so a bulk click cannot quietly undo hand adjudication
+    overwrite: bool = False
+
+
 def _infer_field(rows: list[dict]) -> str:
     found = {k for r in rows for k in r} & set(FIELDS)
     if len(found) == 1:
@@ -159,17 +173,61 @@ def get_batch(batch_id: int, undecided: bool = Query(False),
     b = db.get(ReviewBatch, batch_id)
     if b is None:
         raise HTTPException(404, "batch not found")
-    q = select(ReviewItem).where(ReviewItem.batch_id == batch_id)
+    # joined rather than copied onto the item at upload time: an abstract may
+    # be written after the batch was created - the usual order is abstracts
+    # first, then core subjects - and a stored copy would show the reviewer a
+    # stale one
+    q = (select(ReviewItem, Fingerprint.abstract, Theme.name.label("theme"),
+                Fingerprint.theme_id)
+         .outerjoin(Fingerprint, Fingerprint.id == ReviewItem.f_id)
+         .outerjoin(Theme, Theme.id == Fingerprint.theme_id)
+         .where(ReviewItem.batch_id == batch_id))
     if undecided:
         q = q.where(ReviewItem.decision.is_(None))
-    items = db.scalars(q.order_by(ReviewItem.id)).all()
+    rows = db.execute(q.order_by(ReviewItem.id)).all()
+
+    # How many questions already carry each candidate label. This is the number
+    # that separates an established label from a near-duplicate somebody just
+    # invented - choosing 'films' (35) over 'film (single)' (new) is obvious
+    # once you can see it, and guesswork otherwise. None means the label does
+    # not exist yet, which is different from existing with zero questions.
+    usage: dict[tuple, int] = {}
+    if b.field in ("theme", "core_subject"):
+        if b.field == "theme":
+            usage = {(t.tache, _key(t.name)): n for t, n in db.execute(
+                select(Theme, func.count(Fingerprint.id))
+                .outerjoin(Fingerprint, Fingerprint.theme_id == Theme.id)
+                .group_by(Theme.id)).all()}
+        else:
+            usage = {(c.theme_id, _key(c.name)): n for c, n in db.execute(
+                select(CoreSubject, func.count(Fingerprint.id))
+                .outerjoin(Fingerprint, Fingerprint.core_subject_id == CoreSubject.id)
+                .group_by(CoreSubject.id)).all()}
+
+    def counts(item: ReviewItem, theme_id) -> dict:
+        """candidate value -> questions using it, or None if it is not a label yet."""
+        if not usage:
+            return {}
+        # a theme is scoped by task, a core subject by the question's theme
+        scope = b.tache if b.field == "theme" else theme_id
+        out = {}
+        for value in set(item.candidates.values()) | (
+                {item.decision} if item.decision else set()):
+            out[value] = usage.get((scope, _key(value)))
+        return out
+
     return {
         "id": b.id, "name": b.name, "field": b.field, "tache": b.tache,
         "applied_at": b.applied_at,
         "items": [{
             "id": i.id, "f_id": i.f_id, "source_id": i.source_id,
             "text": i.text, "candidates": i.candidates, "decision": i.decision,
-        } for i in items],
+            # the English one-liner is what makes a queue readable at speed;
+            # the theme matters because a core subject only means anything
+            # under one
+            "abstract": abstract, "theme": theme, "theme_id": theme_id,
+            "usage": counts(i, theme_id),
+        } for i, abstract, theme, theme_id in rows],
     }
 
 
@@ -183,6 +241,44 @@ def decide(batch_id: int, item_id: int, payload: DecisionIn,
     item.decided_at = utcnow() if payload.decision is not None else None
     db.commit()
     return {"id": item.id, "decision": item.decision}
+
+
+@router.post("/reviews/{batch_id}/decide-all")
+def decide_all(batch_id: int, payload: DecideAllIn,
+               db: Session = Depends(get_db)) -> dict:
+    """Accept every candidate in one request.
+
+    Server-side rather than a loop in the browser: a 200-item batch would
+    otherwise be 200 round trips, and a half-finished loop would leave the
+    batch in a state nobody chose.
+    """
+    b = db.get(ReviewBatch, batch_id)
+    if b is None:
+        raise HTTPException(404, "batch not found")
+
+    decided = ambiguous = kept = 0
+    now = utcnow()
+    for item in db.scalars(select(ReviewItem)
+                           .where(ReviewItem.batch_id == batch_id)).all():
+        if item.decision is not None and not payload.overwrite:
+            kept += 1
+            continue
+        if payload.run is not None:
+            value = item.candidates.get(payload.run)
+        elif len(item.candidates) == 1:
+            value = next(iter(item.candidates.values()))
+        else:
+            # several answers and no run named: choosing for the reviewer here
+            # would be inventing an adjudication, so leave it for them
+            ambiguous += 1
+            continue
+        if value is None:
+            ambiguous += 1
+            continue
+        item.decision, item.decided_at = str(value), now
+        decided += 1
+    db.commit()
+    return {"decided": decided, "left_for_you": ambiguous, "already_decided": kept}
 
 
 @router.post("/reviews/{batch_id}/apply")
@@ -204,7 +300,17 @@ def apply_batch(batch_id: int, db: Session = Depends(get_db)) -> dict:
              for c in db.scalars(select(CoreSubject)).all()}
 
     applied = unchanged = skipped = 0
-    unresolved: collections.Counter = collections.Counter()
+    # keyed on what it would take to fix it - the label, and for a core subject
+    # the theme it would have to live under - so the UI can offer to create the
+    # exact thing that is missing rather than just naming it
+    unresolved: dict[tuple, dict] = {}
+
+    def cannot(field: str, value: str, theme_id=None, theme=None, why=None) -> None:
+        k = (field, _key(value), theme_id)
+        entry = unresolved.setdefault(k, {"field": field, "value": value,
+                                          "theme_id": theme_id, "theme": theme,
+                                          "why": why, "count": 0})
+        entry["count"] += 1
     for item in db.scalars(select(ReviewItem)
                            .where(ReviewItem.batch_id == batch_id)).all():
         if item.decision is None or item.decision == "" or item.f_id is None:
@@ -220,15 +326,18 @@ def apply_batch(batch_id: int, db: Session = Depends(get_db)) -> dict:
         elif b.field == "theme":
             new, column = theme_id.get((f.tache, _key(item.decision))), "theme_id"
             if new is None:
-                unresolved[f"theme {item.decision!r}"] += 1
+                cannot("theme", item.decision)
                 continue
         else:
             if f.theme_id is None:
-                unresolved[f"core_subject {item.decision!r} (question has no theme)"] += 1
+                # nothing to add it under: a core subject belongs to a theme
+                cannot("core_subject", item.decision,
+                       why="that question has no theme yet")
                 continue
             new, column = cs_id.get((f.theme_id, _key(item.decision))), "core_subject_id"
             if new is None:
-                unresolved[f"core_subject {item.decision!r}"] += 1
+                theme_name = db.get(Theme, f.theme_id).name
+                cannot("core_subject", item.decision, f.theme_id, theme_name)
                 continue
 
         if getattr(f, column) == new:
@@ -240,7 +349,8 @@ def apply_batch(batch_id: int, db: Session = Depends(get_db)) -> dict:
     b.applied_at = utcnow()
     db.commit()
     return {"applied": applied, "unchanged": unchanged, "skipped": skipped,
-            "unresolved": dict(unresolved)}
+            "unresolved": sorted(unresolved.values(),
+                                 key=lambda u: (-u["count"], u["value"]))}
 
 
 @router.delete("/reviews/{batch_id}", status_code=status.HTTP_204_NO_CONTENT)

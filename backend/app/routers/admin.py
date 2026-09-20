@@ -268,7 +268,11 @@ def list_questions(
     tache: int = Query(2, ge=2, le=3),
     q: Optional[str] = None,
     theme_id: Optional[int] = None,
+    core_subject_id: Optional[int] = None,
     unlabelled: Optional[str] = Query(None, pattern="^(theme|abstract|core_subject)$"),
+    inconsistent: bool = Query(False,
+                               description="only questions whose core subject "
+                                           "belongs to a different theme"),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
@@ -280,6 +284,13 @@ def list_questions(
                          Fingerprint.abstract.ilike(f"%{q}%")))
     if theme_id:
         where.append(Fingerprint.theme_id == theme_id)
+    if core_subject_id:
+        where.append(Fingerprint.core_subject_id == core_subject_id)
+    if inconsistent:
+        # a pair no current endpoint can create, but older loads could: the
+        # question says one theme and its core subject lives under another
+        where.append(Fingerprint.core_subject_id.isnot(None))
+        where.append(Fingerprint.theme_id != CoreSubject.theme_id)
     if unlabelled == "theme":
         where.append(Fingerprint.theme_id.is_(None))
     elif unlabelled == "core_subject":
@@ -287,8 +298,13 @@ def list_questions(
     elif unlabelled == "abstract":
         where.append(Fingerprint.abstract.is_(None))
 
-    total = db.scalar(select(func.count()).select_from(Fingerprint)
-                      .where(*where)) or 0
+    # counted through the same joins as the rows. A filter that mentions
+    # core_subjects without joining it turns the count into a cartesian product
+    # - 70,522 instead of 4, with the right rows underneath it.
+    joined = (select(func.count()).select_from(Fingerprint)
+              .outerjoin(Theme, Theme.id == Fingerprint.theme_id)
+              .outerjoin(CoreSubject, CoreSubject.id == Fingerprint.core_subject_id))
+    total = db.scalar(joined.where(*where)) or 0
     rows = db.execute(
         select(Fingerprint, Theme, CoreSubject)
         .outerjoin(Theme, Theme.id == Fingerprint.theme_id)
@@ -361,7 +377,19 @@ def bulk_label(payload: BulkLabelIn, db: Session = Depends(get_db)) -> dict:
 
     rows = db.scalars(select(Fingerprint)
                       .where(Fingerprint.id.in_(payload.f_ids))).all()
+
+    # Without a theme in the payload, each row keeps its own - and a core
+    # subject only belongs under one theme. Applying it to rows themed
+    # elsewhere would write the inconsistent pair that set_labels refuses to,
+    # so those rows are skipped and counted rather than quietly corrupted.
+    target_theme = (payload.theme_id if payload.theme_id is not None
+                    else (cs.theme_id if payload.core_subject_id is not None else None))
+    updated = wrong_theme = 0
     for f in rows:
+        if payload.core_subject_id is not None and target_theme != (
+                payload.theme_id if payload.theme_id is not None else f.theme_id):
+            wrong_theme += 1
+            continue
         if payload.theme_id is not None:
             # a core subject from the old theme cannot survive the move
             if f.theme_id != payload.theme_id and payload.core_subject_id is None:
@@ -369,5 +397,7 @@ def bulk_label(payload: BulkLabelIn, db: Session = Depends(get_db)) -> dict:
             f.theme_id = payload.theme_id
         if payload.core_subject_id is not None:
             f.core_subject_id = payload.core_subject_id
+        updated += 1
     db.commit()
-    return {"updated": len(rows), "requested": len(payload.f_ids)}
+    return {"updated": updated, "requested": len(payload.f_ids),
+            "skipped_wrong_theme": wrong_theme}

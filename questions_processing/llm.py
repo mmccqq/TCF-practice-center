@@ -859,7 +859,11 @@ def cmd_selftest(_args) -> None:
         # is written.
         prompt = task.prompt_for(rows)
         if task.examples:
-            example = json.loads(prompt[prompt.index("{", prompt.index("Sortie")):])
+            # raw_decode, not loads: the prompt continues after the example
+            # (the JSON note providers need), and loads would call that
+            # trailing prose "Extra data" and fail
+            example, _ = json.JSONDecoder().raw_decode(
+                prompt[prompt.index("{", prompt.index("Sortie")):])
             assert ENVELOPE in example, f"{tname}: example envelope != schema envelope"
             assert all(task.answer_key in item for item in example[ENVELOPE]), \
                 f"{tname}: example answer key != schema answer key"

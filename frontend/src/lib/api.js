@@ -99,6 +99,8 @@ export const adminCreateBatch = (body) =>
 export const adminDecide = (batchId, itemId, decision) =>
   api(`/api/admin/reviews/${batchId}/items/${itemId}`,
       { method: 'PATCH', body: { decision }, auth: true })
+export const adminDecideAll = (id, body) =>
+  api(`/api/admin/reviews/${id}/decide-all`, { method: 'POST', body, auth: true })
 export const adminApplyBatch = (id) =>
   api(`/api/admin/reviews/${id}/apply`, { method: 'POST', body: {}, auth: true })
 export const adminDeleteBatch = (id) =>
@@ -108,3 +110,24 @@ export const adminCompare = (body) =>
 export const signup = (body) => api('/api/auth/signup', { method: 'POST', body })
 export const login = (body) => api('/api/auth/login', { method: 'POST', body })
 export const fetchMe = () => api('/api/auth/me', { auth: true })
+
+/**
+ * Query keys that admin edits invalidate.
+ *
+ * The public pages compute from the same tables, so a label written in the
+ * admin area is live on the server immediately - but the browser holds its
+ * answers for `staleTime` (60s), so the Core set page would keep showing the
+ * old grouping until that expired or the tab was reloaded. Same shape of bug
+ * as bookmarks not appearing after starring one.
+ */
+export const PUBLIC_KEYS = [
+  ['frequent'],        // the core set: subjects, counts, representatives
+  ['core-progress'],   // "12 of 86", on the home page and the task banner
+  ['questions'],       // the task list, which renders theme and core_subject
+  ['meta'],            // the theme filter's options and counts
+  ['bookmarks'],       // bookmarked rows carry theme and core_subject too
+]
+
+export function invalidatePublic(qc) {
+  PUBLIC_KEYS.forEach((queryKey) => qc.invalidateQueries({ queryKey }))
+}

@@ -42,3 +42,5 @@ backend/questions_*
 questions_processing/gold_set/questions_*
 questions_processing/test/test_questions.jsonl
 .gitignore
+questions_processing/questions_reussir/tache2.jsonl
+questions_processing/questions_reussir/tache3.jsonl

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import {
   adminBulkLabel, adminQuestions, adminSetLabels, adminVocabulary,
+  invalidatePublic,
 } from '../../lib/api'
 import { TacheTabs } from './AdminLayout'
 
@@ -9,7 +10,9 @@ const PER_PAGE = 50
 
 export default function Labelling() {
   const [tache, setTache] = useState(2)
-  const [filters, setFilters] = useState({ unlabelled: 'theme', q: '', theme_id: '' })
+  const [filters, setFilters] = useState({
+    unlabelled: 'theme', q: '', theme_id: '', core_subject_id: '', inconsistent: false,
+  })
   const [page, setPage] = useState(1)
   const [picked, setPicked] = useState(() => new Set())
   const [error, setError] = useState('')
@@ -18,7 +21,9 @@ export default function Labelling() {
   const params = { tache, page, per_page: PER_PAGE }
   if (filters.q) params.q = filters.q
   if (filters.theme_id) params.theme_id = filters.theme_id
+  if (filters.core_subject_id) params.core_subject_id = filters.core_subject_id
   if (filters.unlabelled) params.unlabelled = filters.unlabelled
+  if (filters.inconsistent) params.inconsistent = true
   const key = ['admin-questions', params]
 
   const { data: vocab } = useQuery({
@@ -27,16 +32,58 @@ export default function Labelling() {
   })
   const { data, isPending } = useQuery({ queryKey: key, queryFn: () => adminQuestions(params) })
 
-  const run = useMutation({
-    mutationFn: ({ fn }) => fn(),
-    onMutate: () => setError(''),
-    onError: (e) => setError(e.message),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['admin-questions'] })
+  // Patch the row in the cache instead of refetching the list.
+  //
+  // Two problems this solves. The selects are controlled by the cached row, so
+  // without an optimistic update the control snaps back to its old value the
+  // moment you change it and stays there until the round trip lands. And
+  // refetching under the default "Missing theme" filter makes the row you just
+  // labelled vanish - correct for the filter, but indistinguishable from the
+  // edit having failed.
+  //
+  // The row now updates in place and stays put. It drops out of the list the
+  // next time the filters or page change, which is when a list is expected to
+  // change.
+  const patchRow = (fId, patch) =>
+    qc.setQueryData(key, (old) => old && {
+      ...old,
+      items: old.items.map((r) => (r.f_id === fId ? { ...r, ...patch } : r)),
+    })
+
+  const save = useMutation({
+    mutationFn: ({ fId, body }) => adminSetLabels(fId, body),
+    onMutate: async ({ fId, preview }) => {
+      setError('')
+      await qc.cancelQueries({ queryKey: key })
+      const prev = qc.getQueryData(key)
+      patchRow(fId, preview)
+      return { prev }
+    },
+    onError: (e, _vars, ctx) => { qc.setQueryData(key, ctx?.prev); setError(e.message) },
+    onSuccess: (row) => {
+      patchRow(row.f_id, row)        // the server's version wins
       qc.invalidateQueries({ queryKey: ['admin-vocabulary'] })
+      invalidatePublic(qc)
     },
   })
-  const act = (fn) => run.mutate({ fn })
+
+  const bulk = useMutation({
+    mutationFn: (body) => adminBulkLabel(body),
+    onMutate: () => setError(''),
+    onError: (e) => setError(e.message),
+    onSuccess: (res, body) => {
+      const t = themes.find((x) => x.id === body.theme_id)
+      body.f_ids.forEach((fId) =>
+        patchRow(fId, { theme_id: t?.id ?? null, theme: t?.name ?? null,
+                        core_subject_id: null, core_subject: null }))
+      if (res.skipped_wrong_theme) {
+        setError(`${res.skipped_wrong_theme} question(s) were skipped: that core `
+                 + `subject belongs to a different theme.`)
+      }
+      qc.invalidateQueries({ queryKey: ['admin-vocabulary'] })
+      invalidatePublic(qc)
+    },
+  })
 
   const themes = vocab?.themes ?? []
   const subjectsFor = (themeId) =>
@@ -67,16 +114,48 @@ export default function Labelling() {
         </select>
         <select
           value={filters.theme_id}
-          onChange={(e) => setFilter({ theme_id: e.target.value })}
+          onChange={(e) => setFilter({ theme_id: e.target.value, core_subject_id: '' })}
           className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm"
         >
           <option value="">Any theme</option>
           {themes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
+        <select
+          value={filters.core_subject_id}
+          onChange={(e) => setFilter({ core_subject_id: e.target.value })}
+          className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm"
+        >
+          <option value="">Any core subject</option>
+          {/* with a theme chosen, just its labels; otherwise every label,
+              grouped, because the same name can exist under two themes and a
+              flat list would show it twice with nothing to tell them apart */}
+          {filters.theme_id
+            ? subjectsFor(Number(filters.theme_id)).map((c) => (
+                <option key={c.id} value={c.id}>{c.name} ({c.usage})</option>
+              ))
+            : themes.map((t) => (
+                <optgroup key={t.id} label={t.name}>
+                  {t.core_subjects.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name} ({c.usage})</option>
+                  ))}
+                </optgroup>
+              ))}
+        </select>
         <form onSubmit={(e) => { e.preventDefault(); setFilter({ q: new FormData(e.target).get('q') }) }}>
           <input name="q" defaultValue={filters.q} placeholder="Search text…"
                  className="rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
         </form>
+        {/* questions whose core subject belongs to a different theme. No
+            current endpoint can create one, but older loads did - four of them
+            - and they are invisible without somewhere to look. */}
+        <label className="flex items-center gap-1 text-sm text-slate-600">
+          <input
+            type="checkbox"
+            checked={filters.inconsistent}
+            onChange={(e) => setFilter({ inconsistent: e.target.checked })}
+          />
+          mismatched theme
+        </label>
         <span className="text-sm text-slate-500">
           {data ? `${data.total.toLocaleString()} question${data.total === 1 ? '' : 's'}` : ''}
         </span>
@@ -94,7 +173,7 @@ export default function Labelling() {
             defaultValue=""
             onChange={(e) => {
               if (!e.target.value) return
-              act(() => adminBulkLabel({ f_ids: [...picked], theme_id: Number(e.target.value) }))
+              bulk.mutate({ f_ids: [...picked], theme_id: Number(e.target.value) })
               setPicked(new Set())
               e.target.value = ''
             }}
@@ -132,9 +211,18 @@ export default function Labelling() {
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <select
                       value={row.theme_id ?? ''}
-                      onChange={(e) => act(() => adminSetLabels(row.f_id, {
-                        theme_id: e.target.value ? Number(e.target.value) : null,
-                      }))}
+                      onChange={(e) => {
+                        const id = e.target.value ? Number(e.target.value) : null
+                        const t = themes.find((x) => x.id === id)
+                        save.mutate({
+                          fId: row.f_id,
+                          body: { theme_id: id },
+                          // the server clears the core subject when the theme
+                          // moves, so the preview has to as well
+                          preview: { theme_id: id, theme: t?.name ?? null,
+                                     core_subject_id: null, core_subject: null },
+                        })
+                      }}
                       className="rounded border border-slate-300 bg-white px-2 py-1 text-xs"
                     >
                       <option value="">— theme —</option>
@@ -143,9 +231,15 @@ export default function Labelling() {
                     <select
                       value={row.core_subject_id ?? ''}
                       disabled={!row.theme_id}
-                      onChange={(e) => act(() => adminSetLabels(row.f_id, {
-                        core_subject_id: e.target.value ? Number(e.target.value) : null,
-                      }))}
+                      onChange={(e) => {
+                        const id = e.target.value ? Number(e.target.value) : null
+                        const c = subjectsFor(row.theme_id).find((x) => x.id === id)
+                        save.mutate({
+                          fId: row.f_id,
+                          body: { core_subject_id: id },
+                          preview: { core_subject_id: id, core_subject: c?.name ?? null },
+                        })
+                      }}
                       className="rounded border border-slate-300 bg-white px-2 py-1 text-xs
                                  disabled:bg-slate-50 disabled:text-slate-400"
                     >
@@ -160,8 +254,10 @@ export default function Labelling() {
                       defaultValue={row.abstract ?? ''}
                       placeholder="abstract…"
                       onBlur={(e) => {
-                        if (e.target.value !== (row.abstract ?? '')) {
-                          act(() => adminSetLabels(row.f_id, { abstract: e.target.value }))
+                        const v = e.target.value
+                        if (v !== (row.abstract ?? '')) {
+                          save.mutate({ fId: row.f_id, body: { abstract: v },
+                                        preview: { abstract: v.trim() || null } })
                         }
                       }}
                       className="min-w-48 flex-1 rounded border border-slate-300 px-2 py-1 text-xs"

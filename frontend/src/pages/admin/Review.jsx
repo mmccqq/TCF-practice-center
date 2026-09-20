@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import {
-  adminApplyBatch, adminBatch, adminBatches, adminCreateBatch, adminDecide,
-  adminDeleteBatch,
+  adminApplyBatch, adminBatch, adminBatches, adminCreateBatch,
+  adminCreateSubject, adminCreateTheme, adminDecide, adminDecideAll,
+  adminDeleteBatch, adminVocabulary, invalidatePublic,
 } from '../../lib/api'
 import { readJsonl } from '../../lib/jsonl'
 
@@ -75,6 +76,16 @@ function Queue({ batchId, onError }) {
     queryFn: () => adminBatch(batchId, onlyOpen ? { undecided: true } : undefined),
   })
   const [applied, setApplied] = useState(null)
+  const [bulk, setBulk] = useState(null)
+
+  // the whole vocabulary, so a reviewer can choose a label neither model
+  // proposed - which is the common case when both are near-misses of an
+  // established one
+  const { data: vocab } = useQuery({
+    queryKey: ['admin-vocabulary', data?.tache],
+    queryFn: () => adminVocabulary({ tache: data.tache }),
+    enabled: !!data,
+  })
 
   const decide = useMutation({
     mutationFn: ({ itemId, decision }) => adminDecide(batchId, itemId, decision),
@@ -93,12 +104,46 @@ function Queue({ batchId, onError }) {
     onSettled: () => qc.invalidateQueries({ queryKey: ['admin-batch', batchId] }),
   })
 
+  // one request, not one per item: a 200-row abstract file is the common case
+  // and clicking through it to accept every answer is not review, it is typing
+  const acceptAll = useMutation({
+    mutationFn: (run) => adminDecideAll(batchId, run ? { run } : {}),
+    onSuccess: (res) => {
+      setBulk(res)
+      qc.invalidateQueries({ queryKey: ['admin-batch', batchId] })
+      qc.invalidateQueries({ queryKey: ['admin-batches'] })
+    },
+    onError: (e) => onError(e.message),
+  })
+
+  // create the missing label and apply again, without leaving the queue. The
+  // vocabulary stays a deliberate act - this is still a click per label - it
+  // just stops being a trip to another tab and back.
+  const addAndRetry = useMutation({
+    mutationFn: async (u) => {
+      if (u.field === 'theme') {
+        await adminCreateTheme({ tache: data.tache, name: u.value })
+      } else {
+        await adminCreateSubject({ theme_id: u.theme_id, name: u.value })
+      }
+      return adminApplyBatch(batchId)
+    },
+    onSuccess: (res) => {
+      setApplied(res)
+      qc.invalidateQueries({ queryKey: ['admin-vocabulary'] })
+      qc.invalidateQueries({ queryKey: ['admin-batches'] })
+      invalidatePublic(qc)
+    },
+    onError: (e) => onError(e.message),
+  })
+
   const apply = useMutation({
     mutationFn: () => adminApplyBatch(batchId),
     onSuccess: (res) => {
       setApplied(res)
       qc.invalidateQueries({ queryKey: ['admin-batches'] })
       qc.invalidateQueries({ queryKey: ['admin-questions'] })
+      invalidatePublic(qc)
     },
     onError: (e) => onError(e.message),
   })
@@ -106,6 +151,18 @@ function Queue({ batchId, onError }) {
   if (isPending) return <p className="text-sm text-slate-500">Loading…</p>
 
   const decided = data.items.filter((i) => i.decision !== null).length
+  // every run name appearing anywhere in the batch; one means "accept all" is
+  // unambiguous, several means the reviewer has to say whose answer to take
+  const runs = [...new Set(data.items.flatMap((i) => Object.keys(i.candidates)))]
+  const remaining = data.items.length - decided
+
+  // themes are scoped by task, core subjects by the question's own theme -
+  // offering another theme's labels would let an inconsistent pair be chosen
+  const choicesFor = (item) => {
+    if (!vocab) return []
+    if (data.field === 'theme') return vocab.themes
+    return vocab.themes.find((t) => t.id === item.theme_id)?.core_subjects ?? []
+  }
 
   return (
     <div className="space-y-3">
@@ -119,33 +176,88 @@ function Queue({ batchId, onError }) {
                  onChange={(e) => setOnlyOpen(e.target.checked)} />
           undecided only
         </label>
-        <button
-          onClick={() => apply.mutate()}
-          disabled={apply.isPending}
-          className="ml-auto rounded-md bg-emerald-600 px-3 py-1.5 font-medium text-white
-                     disabled:opacity-50"
-        >
-          {apply.isPending ? 'Applying…' : 'Apply decisions'}
-        </button>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {remaining > 0 && (
+            runs.length <= 1 ? (
+              <button
+                onClick={() => acceptAll.mutate(null)}
+                disabled={acceptAll.isPending}
+                className="rounded-md border border-slate-300 px-3 py-1.5 font-medium
+                           disabled:opacity-50"
+              >
+                {acceptAll.isPending ? 'Accepting…' : `Accept all ${remaining} remaining`}
+              </button>
+            ) : (
+              <select
+                defaultValue=""
+                onChange={(e) => { if (e.target.value) acceptAll.mutate(e.target.value) }}
+                className="rounded-md border border-slate-300 bg-white px-2 py-1.5"
+              >
+                <option value="">Accept all {remaining} from…</option>
+                {runs.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            )
+          )}
+          <button
+            onClick={() => apply.mutate()}
+            disabled={apply.isPending}
+            className="rounded-md bg-emerald-600 px-3 py-1.5 font-medium text-white
+                       disabled:opacity-50"
+          >
+            {apply.isPending ? 'Applying…' : 'Apply decisions'}
+          </button>
+        </div>
       </div>
+
+      {bulk && (
+        <p className="rounded-lg border border-slate-300 bg-slate-50 p-3 text-sm">
+          Accepted {bulk.decided}.
+          {bulk.left_for_you > 0 && (
+            <> {bulk.left_for_you} still need you — those have more than one answer.</>
+          )}
+          {bulk.already_decided > 0 && (
+            <> {bulk.already_decided} you had already decided were left alone.</>
+          )}
+          {' '}Nothing is written until you press Apply.
+        </p>
+      )}
 
       {applied && (
         <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-sm">
           <strong>{applied.applied} written</strong>, {applied.unchanged} already
           the same, {applied.skipped} skipped.
-          {Object.keys(applied.unresolved).length > 0 && (
+          {applied.unresolved.length > 0 && (
             <>
               <p className="mt-2 font-medium text-amber-800">
                 Not in the vocabulary, so not written:
               </p>
-              <ul className="mt-1 list-inside list-disc text-amber-800">
-                {Object.entries(applied.unresolved).map(([k, n]) => (
-                  <li key={k}>{k} — {n}</li>
+              <ul className="mt-1 space-y-1">
+                {applied.unresolved.map((u) => (
+                  <li key={`${u.field}-${u.value}-${u.theme_id}`}
+                      className="flex flex-wrap items-center gap-2 text-amber-900">
+                    <strong>{u.value}</strong>
+                    <span className="text-xs">
+                      {u.field}
+                      {u.theme && ` under ${u.theme}`} · {u.count} question
+                      {u.count === 1 ? '' : 's'}
+                    </span>
+                    {u.why ? (
+                      // nothing to add it under - the reviewer has to give the
+                      // question a theme first, which is a different tool
+                      <span className="text-xs italic">{u.why}</span>
+                    ) : (
+                      <button
+                        onClick={() => addAndRetry.mutate(u)}
+                        disabled={addAndRetry.isPending}
+                        className="rounded border border-amber-400 bg-white px-2 py-0.5
+                                   text-xs font-medium hover:bg-amber-100 disabled:opacity-50"
+                      >
+                        {addAndRetry.isPending ? 'Adding…' : 'Add and apply'}
+                      </button>
+                    )}
+                  </li>
                 ))}
               </ul>
-              <p className="mt-1 text-slate-600">
-                Add them under Vocabulary, then apply again.
-              </p>
             </>
           )}
         </div>
@@ -160,8 +272,21 @@ function Queue({ batchId, onError }) {
                   item.decision !== null ? 'border-emerald-200 bg-emerald-50/40'
                                          : 'border-slate-200 bg-white'
                 }`}>
-              <p className="text-sm leading-relaxed">{item.text || <em>no text</em>}</p>
-              <p className="mt-1 text-xs text-slate-400">
+              {/* abstract first: it is English and one line, so a queue can be
+                  read at speed, with the French underneath for the judgement
+                  call. review.html put them in this order for the same reason. */}
+              {item.abstract && (
+                <p className="text-sm font-medium text-slate-800">{item.abstract}</p>
+              )}
+              <p className={`text-sm leading-relaxed ${item.abstract ? 'mt-0.5 text-slate-600' : ''}`}>
+                {item.text || <em>no text</em>}
+              </p>
+              <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                {item.theme && (
+                  <span className="rounded bg-sky-100 px-1.5 py-0.5 text-sky-800">
+                    {item.theme}
+                  </span>
+                )}
                 {item.f_id ? `f_id ${item.f_id}` : (
                   <span className="text-red-600">
                     no question matches id {item.source_id} — cannot be applied
@@ -169,20 +294,33 @@ function Queue({ batchId, onError }) {
                 )}
               </p>
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                {options.map(([run, value]) => (
-                  <button
-                    key={run}
-                    onClick={() => decide.mutate({ itemId: item.id, decision: value })}
-                    className={`rounded px-2 py-1 text-xs transition ${
-                      item.decision === value
-                        ? 'bg-emerald-600 text-white'
-                        : 'bg-slate-100 hover:bg-slate-200'
-                    }`}
-                  >
-                    {value}
-                    <span className="ml-1 opacity-60">{run}</span>
-                  </button>
-                ))}
+                {options.map(([run, value]) => {
+                  // how many questions already use this label. `new` is the
+                  // important one: it says this answer would widen the
+                  // vocabulary rather than reuse it, which is usually the wrong
+                  // choice when a sibling label is sitting at 10.
+                  const used = item.usage?.[value]
+                  const chosen = item.decision === value
+                  return (
+                    <button
+                      key={run}
+                      onClick={() => decide.mutate({ itemId: item.id, decision: value })}
+                      className={`flex items-center gap-1 rounded px-2 py-1 text-xs transition ${
+                        chosen ? 'bg-emerald-600 text-white' : 'bg-slate-100 hover:bg-slate-200'
+                      }`}
+                    >
+                      <span>{value}</span>
+                      {used === undefined ? null : used === null ? (
+                        <span className={`rounded px-1 ${
+                          chosen ? 'bg-white/25' : 'bg-amber-200 text-amber-900'
+                        }`}>new</span>
+                      ) : (
+                        <span className={chosen ? 'opacity-80' : 'text-slate-500'}>{used}</span>
+                      )}
+                      <span className="opacity-60">{run}</span>
+                    </button>
+                  )
+                })}
                 <input
                   defaultValue={item.decision && !options.some(([, v]) => v === item.decision)
                     ? item.decision : ''}
@@ -193,6 +331,26 @@ function Queue({ batchId, onError }) {
                   }}
                   className="rounded border border-slate-300 px-2 py-1 text-xs"
                 />
+                {data.field !== 'abstract' && choicesFor(item).length > 0 && (
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        decide.mutate({ itemId: item.id, decision: e.target.value })
+                      }
+                    }}
+                    className="rounded border border-slate-300 bg-white px-2 py-1 text-xs"
+                  >
+                    <option value="">
+                      or pick from {item.theme ?? `Task ${data.tache}`}…
+                    </option>
+                    {choicesFor(item).map((c) => (
+                      <option key={c.id} value={c.name}>
+                        {c.name} ({c.usage})
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <button
                   onClick={() => decide.mutate({ itemId: item.id, decision: '' })}
                   className={`rounded px-2 py-1 text-xs ${

@@ -123,6 +123,9 @@ export default function Compare() {
           <div className="grid gap-4 sm:grid-cols-2">
             <section className="rounded-lg border border-slate-200 bg-white p-4">
               <h3 className="text-sm font-semibold">What they disagree about</h3>
+              <p className="text-xs text-slate-500">
+                each pair of answers the runs split on, and how often
+              </p>
               <ul className="mt-2 space-y-1 text-sm">
                 {result.label_pairs.slice(0, 12).map((p) => (
                   <li key={p.pair} className="flex gap-2">
@@ -135,16 +138,28 @@ export default function Compare() {
             <section className="rounded-lg border border-slate-200 bg-white p-4">
               <h3 className="text-sm font-semibold">Most contested labels</h3>
               <p className="text-xs text-slate-500">
-                a label appearing often here is usually one whose definition is unclear
+                How many disagreements each label took part in. A label near the top
+                is one the models keep choosing where another model chooses something
+                else — usually its boundary against a neighbour is unclear, which is a
+                prompt or vocabulary fix rather than a per-question one.
               </p>
-              <ul className="mt-2 space-y-1 text-sm">
-                {result.contested_labels.slice(0, 12).map((l) => (
-                  <li key={l.label} className="flex gap-2">
-                    <span className="w-8 shrink-0 text-right text-slate-400">{l.count}</span>
-                    <span>{l.label}</span>
-                  </li>
-                ))}
-              </ul>
+              {/* all-1s is not a ranking, it is noise: with few disagreements every
+                  label appears once and the order means nothing */}
+              {result.contested_labels[0]?.count === 1 ? (
+                <p className="mt-2 text-sm text-slate-500">
+                  Every label here appears once — {result.disagreed} disagreement
+                  {result.disagreed === 1 ? '' : 's'} is too few to show a pattern.
+                </p>
+              ) : (
+                <ul className="mt-2 space-y-1 text-sm">
+                  {result.contested_labels.slice(0, 12).map((l) => (
+                    <li key={l.label} className="flex gap-2">
+                      <span className="w-8 shrink-0 text-right text-slate-400">{l.count}</span>
+                      <span>{l.label}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
           </div>
         </div>

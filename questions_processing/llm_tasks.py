@@ -71,9 +71,24 @@ class Task:
                 + "\n\nSortie correspondante:\n\n"
                 + json.dumps({ENVELOPE: shown}, ensure_ascii=False, indent=1))
 
+    #: Appended to every prompt. DeepSeek rejects `response_format=json_object`
+    #: unless the literal word "json" appears somewhere in the prompt - a
+    #: substring check, not an understanding of the request:
+    #:
+    #:   400 Prompt must contain the word 'json' in some form to use
+    #:       'response_format' of type 'json_object'
+    #:
+    #: A worked example made of JSON does not satisfy it. Rather than leaving
+    #: each task's rules to remember the word - core_subject did not, and only
+    #: failed on the one provider that checks - it is added here, once, for all
+    #: of them. Harmless on providers that do not care, and harmless to repeat
+    #: for the tasks whose rules already say it.
+    JSON_NOTE = ("\n\nRepondez uniquement avec un objet JSON de la forme montree "
+                 "ci-dessus.")
+
     @property
     def prompt(self) -> str:
-        return self.rules.rstrip() + self.example() + "\n"
+        return self.rules.rstrip() + self.example() + self.JSON_NOTE + "\n"
 
     def prompt_for(self, rows: list[dict]) -> str:
         """The prompt for one chunk. Constant unless a task overrides it.
@@ -451,7 +466,10 @@ class CoreSubjectTask(Task):
         else:
             block = (f"\n\nThere is no vocabulary yet for the theme {theme!r}. "
                      f"Propose a short label and treat every one as new.")
-        return self.rules.rstrip() + block + self.example() + "\n"
+        # same tail as Task.prompt - this override rebuilds the prompt rather
+        # than extending it, so the JSON note has to be repeated here or it is
+        # lost exactly for the task that already forgot to mention JSON
+        return self.rules.rstrip() + block + self.example() + self.JSON_NOTE + "\n"
 
 
 CORE_SUBJECT = CoreSubjectTask(

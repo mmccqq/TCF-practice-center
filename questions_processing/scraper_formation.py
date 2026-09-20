@@ -236,14 +236,25 @@ def discover_months(html: str) -> list[MonthInfo]:
     ]
 
 
-def crawl(raw_dir: Path, limit: int | None, delay: float, force: bool) -> None:
+def crawl(raw_dir: Path, limit: int | None, delay: float, force: bool,
+          offline: bool = False) -> None:
     raw_dir.mkdir(parents=True, exist_ok=True)
     sess = PoliteSession(delay=delay)
 
     index_path = raw_dir / "_hub.html"
-    if force or not index_path.exists():
+    # The hub is a listing, not an archive: it gains a link every time a new
+    # month is published, so a cached copy can only ever be out of date - which
+    # is why September's pages were invisible while a 27 August copy sat here.
+    # It is re-fetched every run. The month pages it points at do not change
+    # once published, so those stay cached; --force re-downloads them too.
+    if offline:
+        if not index_path.exists():
+            sys.exit("--offline needs a cached _hub.html; run once online first")
+        print(f"using cached {index_path.name}")
+    else:
         print(f"GET {HUB_URL}")
         index_path.write_text(sess.get(HUB_URL), encoding="utf-8")
+
     months = discover_months(index_path.read_text(encoding="utf-8"))
     # newest first - sort by (year, month number), not month name (alphabetical
     # order would rank "Mars" ahead of "Aout")
@@ -254,6 +265,9 @@ def crawl(raw_dir: Path, limit: int | None, delay: float, force: bool) -> None:
         dest = raw_dir / f"{m.slug}.html"
         if dest.exists() and not force:
             print(f"skip  {dest.name} (cached)")
+            continue
+        if offline:
+            print(f"skip  {dest.name} (offline)")
             continue
         url = f"{HUB_URL}/{m.slug}"
         print(f"GET   {m.name:<14} {url}")
@@ -474,7 +488,9 @@ def main() -> None:
     c.add_argument("--raw-dir", type=Path, default=Path("raw_formation"))
     c.add_argument("--limit", type=int, default=None, help="only the N newest months")
     c.add_argument("--delay", type=float, default=DELAY_SECONDS)
-    c.add_argument("--force", action="store_true", help="re-download cached pages")
+    c.add_argument("--force", action="store_true", help="re-download cached month pages")
+    c.add_argument("--offline", action="store_true",
+                   help="use the cached hub and touch the network for nothing")
 
     p = sub.add_parser("parse", help="extract questions from saved HTML")
     p.add_argument("--raw-dir", type=Path, default=Path("raw_formation"))
@@ -485,7 +501,7 @@ def main() -> None:
 
     args = ap.parse_args()
     if args.cmd == "crawl":
-        crawl(args.raw_dir, args.limit, args.delay, args.force)
+        crawl(args.raw_dir, args.limit, args.delay, args.force, args.offline)
     elif args.cmd == "parse":
         parse_all(args.raw_dir, args.out_dir)
     else:

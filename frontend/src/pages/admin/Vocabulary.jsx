@@ -3,6 +3,7 @@ import { useState } from 'react'
 import {
   adminCreateSubject, adminCreateTheme, adminDeleteSubject, adminDeleteTheme,
   adminMergeSubject, adminRenameTheme, adminUpdateSubject, adminVocabulary,
+  invalidatePublic,
 } from '../../lib/api'
 import { TacheTabs } from './AdminLayout'
 
@@ -26,7 +27,10 @@ export default function Vocabulary() {
     mutationFn: ({ fn }) => fn(),
     onMutate: () => setError(''),
     onError: (e) => setError(e.message),
-    onSuccess: () => qc.invalidateQueries({ queryKey: key }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: key })
+      invalidatePublic(qc)
+    },
   })
   const act = (fn) => run.mutate({ fn })
 
