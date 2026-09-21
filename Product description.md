@@ -6,13 +6,19 @@ A focused preparation platform for the TCF Canada exam, built around real past q
 
 Real exam question bank
 
-The core of the platform is an archive of past TCF Canada questions across all four sections. The deepest coverage is in speaking, where Tasks 2 and 3 carry the most preparation value:
+The core of the platform is an archive of past TCF Canada questions across all four sections. The deepest coverage is in speaking, where Tasks 2 and 3 carry the most preparation value.
 
-High-frequency banks — questions filtered to the last 6 months and last 12 months, so candidates can prioritize what is statistically most likely to appear.
-Full bank — the complete archive with search and filtering.
-Theme classification — questions grouped by topic (work, travel, life in Canada for Task 2; education, immigration, technology for Task 3) so candidates can prepare by theme instead of question by question.
+Oral core set — the recommended path, and the platform's main claim. Questions are grouped into core subjects, each subject ranked by how many distinct exam months it has actually come up in. Around 2,750 unique questions reduce to roughly 90 subjects, each shown by its most-asked question with the rest one click away. Frequency is counted in months rather than in reports, so a question two sources both filed for the same sitting counts once — the number a candidate sees is the number of times the exam asked.
+
+Full bank — the complete archive, grouped into month sections, with search and theme filtering. A question that recurred across eighteen months appears in each of those months while carrying one set of labels and one practised state.
+
+Theme classification — every question carries a theme and a finer core subject drawn from a controlled vocabulary, so candidates can prepare by topic instead of question by question.
+
+Progress tracking — a practised tick and a bookmark star on every question, both keyed to the question itself rather than to one month's copy. Marking a question practised in September marks it everywhere it appears, and progress is shown per theme and across the whole core set so "am I done with this topic" has an answer.
+
+Bookmarks — a saved list per task, newest first, for questions worth returning to.
+
 Answer strategies — each question links to a suggested approach and, for Task 3, a full model response.
-Progress tracking — completion state at the individual question level, visible across both the high-frequency and full banks.
 
 Material library
 
@@ -34,17 +40,23 @@ Sign-up and login, including Google sign-in, with password management. Each acco
 
 Admin and content operations
 
-The question bank is not hand-written, and keeping it accurate is most of the work. An admin area inside the platform — gated on an account flag rather than run as a separate application — covers the whole curation loop.
+The question bank is not hand-written, and keeping it accurate is most of the work. An admin area inside the platform — gated on an account flag rather than run as a separate application — covers the whole pipeline, from scraping to a labelled question, without leaving the browser.
+
+Intake. One action checks each source for exam months the bank does not have, downloads only those pages, parses them in memory, and loads three layers: every scraped sighting, the deduplicated questions those sightings collapse into, and one row per month each question appeared in. No HTML is stored, because the database already records which months are in — so a routine run fetches a page or two rather than an archive, and works on a host whose filesystem is wiped between restarts.
+
+Labelling runs. A labelling run is started from the questions themselves: filter to what is missing a theme, select them, choose a task, model and batch size, and start. Runs execute on the server and are watched from a job list with live progress, timings, cancellation, and a link to the results. A run that dies — a deploy, an idle host — is reported as interrupted rather than left looking alive, and whatever it completed is still reviewable. A per-job question ceiling bounds what one mistyped filter can spend.
 
 Vocabulary management. Themes and their controlled vocabularies are stored as tables with foreign keys, so a label nobody approved cannot be attached to a question. Each label is shown with how many questions use it, which is what exposes dead entries and near-duplicates. Labels can be added, renamed, moved between themes, and merged; merging repoints every affected question and then removes the old label. Deleting a label that is still in use is refused, so no action can silently strip labels from questions.
 
 Labelling workspace. Questions can be filtered to those missing a theme, core subject, or abstract, then edited in place or assigned in bulk. Core subjects are scoped to their theme, so an inconsistent pairing cannot be saved at all.
 
-Review queue. Output from an LLM labelling run is uploaded and adjudicated one item at a time: take a model's answer, type a different one, or skip. Decisions are stored server-side, so a review survives a cleared browser and can be finished on another machine. Applying a batch writes straight to the question bank and reports whatever it could not resolve — usually a label that is not in the vocabulary yet — rather than failing or inventing one.
+Review queue. Answers are adjudicated one item at a time: take a model's answer, pick an existing label from the question's theme, type something new, or skip. Each candidate shows how many questions already use it, which is what separates an established label from a near-duplicate a model has just invented. Decisions are stored server-side, so a review survives a cleared browser and can be finished on another machine. Applying a batch writes straight to the question bank and reports whatever it could not resolve — usually a label not yet in the vocabulary — with a one-click option to add it and apply again, rather than failing or inventing one.
 
-Model comparison. Two or more labelling runs can be compared for agreement, with disagreements grouped by label pair and by which labels are contested most often. Agreement is used as triage rather than as a measure of accuracy: where every model agrees the answer is usually right and needs no human, and where they split is where review time is worth spending. Disagreements convert into a review queue in one action.
+Model comparison. A run can ask two models instead of one. Both sets of answers land in a single batch, so where the models agree the answers can be accepted in one action and only the disagreements need a person. Agreement is treated as triage rather than as a measure of accuracy: where every model agrees the answer is usually right, and where they split is where review time is worth spending. Disagreements are grouped by label pair and by which labels are contested most often — a label appearing repeatedly there is one whose boundary against a neighbour needs redrawing, which is a prompt fix rather than a per-question one.
 
-The system ingests model output rather than calling model APIs itself. Labelling runs stay on a workstation where prompts and spend are under direct control, and the server holds no provider credentials.
+Because the agreed answers and the adjudicated ones live in the same batch, a comparison is applied in a single pass. Loading one model's output, comparing, and then loading the resolved disagreements — three passes over the same questions — is the workflow this replaces.
+
+Export. Any filtered view of the bank downloads as a spreadsheet with every field, for analysis outside the platform.
 
 Behind the scenes
 

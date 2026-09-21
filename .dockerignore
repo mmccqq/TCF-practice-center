@@ -23,10 +23,17 @@
 # rebuilt by stage 1 of the Dockerfile; a stale macOS build must not overwrite it
 frontend/dist
 
-# scraped data and review artefacts - only seed.py needs these, and seeding is
-# run from your laptop against the remote database
+# questions_processing/ is copied into the image because the admin system
+# imports its scrapers, llm.py and deduplication. Its DATA is not: the cached
+# HTML is 35 MB that the server never reads - it fetches and parses pages in
+# memory - and the JSONL is output, not input.
+questions_processing/raw_*/
+questions_processing/questions_*/
+questions_processing/gold_set/
+questions_processing/test/
+**/*.jsonl
 raw_formation/
 raw_opal/
 raw_reussir/
 *.xlsx
-.DS_Store
+**/.DS_Store
