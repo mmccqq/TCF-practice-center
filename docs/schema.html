@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>TCF Practice Center · Entity Relationships</title>
+<style>
+  /* Same four band hues as the architecture poster, from the reference
+     categorical palette (slots 1,2,3,7), validated as a set: worst adjacent
+     CVD ΔE 9.2, normal-vision 27.6. Every group is labelled, which is the
+     relief the aqua slot's sub-3:1 contrast requires. */
+  :root{
+    --ink:#0b0b0b; --ink-2:#52514e; --ink-3:#767570;
+    --surface:#fcfcfb; --rule:#e2e1dc;
+    --spine:#eb6834; --spine-bg:#fdf1ec; --spine-line:#f7d5c5;
+    --vocab:#2a78d6; --vocab-bg:#eef4fd; --vocab-line:#cfe0f7;
+    --user:#1baf7a;  --user-bg:#ecf8f3;  --user-line:#c5e9da;
+    --ops:#4a3aa7;   --ops-bg:#f1effa;   --ops-line:#d8d2f0;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:32px;background:var(--surface);color:var(--ink);
+       font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .sheet{max-width:1240px;margin:0 auto}
+  h1{font-size:24px;margin:0 0 4px;letter-spacing:-.01em}
+  .sub{color:var(--ink-2);margin:0 0 20px;max-width:80ch}
+
+  .group{border-radius:10px;border:1px solid;padding:13px 15px 15px;margin-bottom:14px}
+  .group>h2{font-size:13px;margin:0 0 11px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+  .group>h2 .note{font-weight:400;font-size:12px;color:var(--ink-3)}
+  .g-spine{background:var(--spine-bg);border-color:var(--spine-line)} .g-spine>h2{color:var(--spine)}
+  .g-vocab{background:var(--vocab-bg);border-color:var(--vocab-line)} .g-vocab>h2{color:var(--vocab)}
+  .g-user{background:var(--user-bg);border-color:var(--user-line)}   .g-user>h2{color:#14805a}
+  .g-ops{background:var(--ops-bg);border-color:var(--ops-line)}      .g-ops>h2{color:var(--ops)}
+
+  .chain{display:flex;align-items:stretch;gap:0}
+  .chain .ent{flex:1}
+  /* the cardinality sits ON the connector, because "many to one" is the
+     single most important fact in this diagram */
+  .link{flex:none;width:118px;display:flex;flex-direction:column;
+        align-items:center;justify-content:center;gap:3px;padding:0 6px;text-align:center}
+  .link .bar{width:100%;height:0;border-top:2px solid var(--ink-2);position:relative}
+  .link .bar::after{content:"";position:absolute;right:-1px;top:-6px;
+        border:6px solid transparent;border-left-color:var(--ink-2)}
+  .link .bar.rev::after{right:auto;left:-1px;border-left-color:transparent;border-right-color:var(--ink-2)}
+  .link b{font-size:12px;letter-spacing:.02em}
+  .link span{font-size:11.5px;color:var(--ink-3);line-height:1.3}
+
+  table.ent{width:100%;border-collapse:separate;border-spacing:0;background:#fff;
+        border:1px solid var(--rule);border-radius:8px;overflow:hidden;font-size:12.5px}
+  table.ent caption{caption-side:top;text-align:left;font-weight:600;font-size:13px;
+        padding:8px 11px 7px;background:#fff;border-bottom:1px solid var(--rule)}
+  table.ent caption em{font-weight:400;font-style:normal;color:var(--ink-3);font-size:11.5px}
+  table.ent td{padding:3.5px 11px;vertical-align:baseline}
+  table.ent tr:nth-child(even) td{background:#fafaf9}
+  td.k{width:30px;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink-3)}
+  td.k.pk{color:#b4530f;font-weight:700}
+  td.k.fk{color:var(--vocab);font-weight:700}
+  td.c{font:12px ui-monospace,SFMono-Regular,Menlo,monospace}
+  td.n{color:var(--ink-3);font-size:11.5px}
+  tr.uq td{background:#fff9f2 !important;color:#8a4b12;font-size:11.5px}
+  tr.uq td.k{color:#8a4b12}
+
+  .side{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+  .cross{border:1px dashed var(--ink-3);border-radius:8px;padding:8px 11px;
+         font-size:12px;color:var(--ink-2);margin-top:10px;background:#fff}
+  .cross b{color:var(--ink)}
+  .foot{border:1px solid var(--rule);border-radius:8px;padding:11px 14px;
+        font-size:12.5px;color:var(--ink-2)}
+  .foot p{margin:0 0 6px} .foot p:last-child{margin:0} .foot b{color:var(--ink)}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+  .legend{display:flex;gap:16px;font-size:12px;color:var(--ink-3);margin:-8px 0 18px}
+  .legend b{font:700 11px ui-monospace,monospace}
+</style>
+</head>
+<body>
+<div class="sheet">
+
+<h1>TCF Practice Center · Entity Relationships</h1>
+<p class="sub">
+  Ten tables. The three across the top are the question spine — a scraped
+  sighting, the question it is a sighting <em>of</em>, and one row per month that
+  question appeared in. Everything a user or an editor touches attaches to the
+  middle one, which is what makes a label or a tick follow a question across
+  every month it recurs in.
+</p>
+<p class="legend">
+  <span><b style="color:#b4530f">PK</b> primary key</span>
+  <span><b style="color:#2a78d6">FK</b> foreign key</span>
+  <span><b style="color:#8a4b12">UQ</b> unique constraint</span>
+  <span>Cardinality is read along the arrow: <code>many ──▶ one</code></span>
+</p>
+
+<!-- ─────────────── the spine ─────────────── -->
+<div class="group g-spine">
+  <h2>Question spine <span class="note">scraped evidence → identity → timeline</span></h2>
+  <div class="chain">
+    <div class="ent">
+      <table class="ent">
+        <caption>raw_questions <em>· 8,438 · internal only</em></caption>
+        <tr><td class="k pk">PK</td><td class="c">id</td><td class="n">the scraper's 13-digit id</td></tr>
+        <tr><td class="k fk">FK</td><td class="c">f_id</td><td class="n">→ fingerprints</td></tr>
+        <tr><td class="k"></td><td class="c">text</td><td class="n">exactly as scraped</td></tr>
+        <tr><td class="k"></td><td class="c">period</td><td class="n">YYYY-MM</td></tr>
+        <tr><td class="k"></td><td class="c">source</td><td class="n">never leaves the server</td></tr>
+        <tr><td class="k"></td><td class="c">tache · partie · sujet</td><td class="n"></td></tr>
+      </table>
+    </div>
+
+    <div class="link">
+      <b>many ▸ one</b>
+      <div class="bar"></div>
+      <span>every sighting of the same wording</span>
+    </div>
+
+    <div class="ent">
+      <table class="ent">
+        <caption>fingerprints <em>· 2,801 · the question</em></caption>
+        <tr><td class="k pk">PK</td><td class="c">id</td><td class="n">surrogate, so a future merge is a pointer change</td></tr>
+        <tr><td class="k"></td><td class="c">fingerprint</td><td class="n">normalised SHA-256</td></tr>
+        <tr><td class="k"></td><td class="c">text</td><td class="n">canonical wording</td></tr>
+        <tr><td class="k fk">FK</td><td class="c">theme_id</td><td class="n">→ themes · nullable</td></tr>
+        <tr><td class="k fk">FK</td><td class="c">core_subject_id</td><td class="n">→ core_subjects · nullable</td></tr>
+        <tr><td class="k"></td><td class="c">abstract</td><td class="n">nullable</td></tr>
+        <tr><td class="k"></td><td class="c">months_seen · total_sightings</td><td class="n">derived</td></tr>
+        <tr><td class="k"></td><td class="c">first_seen · last_seen</td><td class="n">derived</td></tr>
+        <tr class="uq"><td class="k">UQ</td><td colspan="2">(tache, fingerprint) — the same wording under Task 2 and Task 3 is two questions</td></tr>
+      </table>
+    </div>
+
+    <div class="link">
+      <b>one ◂ many</b>
+      <div class="bar rev"></div>
+      <span>one row per month it appeared in</span>
+    </div>
+
+    <div class="ent">
+      <table class="ent">
+        <caption>list_questions <em>· 6,895 · what the page renders</em></caption>
+        <tr><td class="k pk">PK</td><td class="c">id</td><td class="n">stable across rebuilds</td></tr>
+        <tr><td class="k fk">FK</td><td class="c">f_id</td><td class="n">→ fingerprints</td></tr>
+        <tr><td class="k"></td><td class="c">period</td><td class="n">the month section</td></tr>
+        <tr><td class="k"></td><td class="c">month_sightings</td><td class="n">reports in <em>this</em> month</td></tr>
+        <tr><td class="k fk">FK</td><td class="c">representative_raw_id</td><td class="n">→ raw_questions</td></tr>
+        <tr class="uq"><td class="k">UQ</td><td colspan="2">(tache, period, f_id) — the database guarantees one row per question per month</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="cross">
+    <b>Why this split is the whole design.</b> Before it, one table was both the
+    identity and the timeline entry: when a question recurred, its id moved to the
+    newest month and the old row was left behind unlabelled — 49 times. Now a
+    question that ran for eighteen months is eighteen <code>list_questions</code>
+    rows sharing one <code>fingerprints</code> row, so it carries one set of labels
+    and one practised state.
+  </div>
+</div>
+
+<div class="side">
+  <!-- ─────────────── vocabulary ─────────────── -->
+  <div class="group g-vocab">
+    <h2>Controlled vocabulary <span class="note">labels as rows, not as free text</span></h2>
+    <div class="chain">
+      <div class="ent">
+        <table class="ent">
+          <caption>themes <em>· 16 · Task 2</em></caption>
+          <tr><td class="k pk">PK</td><td class="c">id</td><td class="n"></td></tr>
+          <tr><td class="k"></td><td class="c">tache</td><td class="n">the two tasks do not share a vocabulary</td></tr>
+          <tr><td class="k"></td><td class="c">name</td><td class="n">"Travel &amp; tourism"</td></tr>
+          <tr class="uq"><td class="k">UQ</td><td colspan="2">(tache, name)</td></tr>
+        </table>
+      </div>
+      <div class="link" style="width:92px">
+        <b>one ◂ many</b>
+        <div class="bar rev"></div>
+        <span>a subject lives under one theme</span>
+      </div>
+      <div class="ent">
+        <table class="ent">
+          <caption>core_subjects <em>· 131 · Task 2</em></caption>
+          <tr><td class="k pk">PK</td><td class="c">id</td><td class="n"></td></tr>
+          <tr><td class="k fk">FK</td><td class="c">theme_id</td><td class="n">→ themes</td></tr>
+          <tr><td class="k"></td><td class="c">name</td><td class="n">"holiday trip"</td></tr>
+          <tr class="uq"><td class="k">UQ</td><td colspan="2">(theme_id, name)</td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="cross">
+      Both are foreign keys on <code>fingerprints</code>, so a label nobody
+      approved cannot be attached at all. Enforcing it caught <b>63 labels</b> the LLM had invented while the columns
+      were free text; 31 named something real and were added to the vocabulary,
+      the rest were wrong.
+    </div>
+  </div>
+
+  <!-- ─────────────── user state ─────────────── -->
+  <div class="group g-user">
+    <h2>User state <span class="note">one row per person per question</span></h2>
+    <div class="chain">
+      <div class="ent">
+        <table class="ent">
+          <caption>users</caption>
+          <tr><td class="k pk">PK</td><td class="c">id</td><td class="n"></td></tr>
+          <tr><td class="k"></td><td class="c">email</td><td class="n">normalised, unique</td></tr>
+          <tr><td class="k"></td><td class="c">hashed_password</td><td class="n">null for Google-only</td></tr>
+          <tr><td class="k"></td><td class="c">google_sub</td><td class="n">unique, nullable</td></tr>
+          <tr><td class="k"></td><td class="c">is_admin</td><td class="n">gates /api/admin/*</td></tr>
+        </table>
+      </div>
+      <div class="link" style="width:92px">
+        <b>one ◂ many</b>
+        <div class="bar rev"></div>
+        <span></span>
+      </div>
+      <div class="ent">
+        <table class="ent">
+          <caption>user_questions</caption>
+          <tr><td class="k pk">PK</td><td class="c">id</td><td class="n"></td></tr>
+          <tr><td class="k fk">FK</td><td class="c">user_id</td><td class="n">→ users</td></tr>
+          <tr><td class="k fk">FK</td><td class="c">f_id</td><td class="n">→ <b>fingerprints</b></td></tr>
+          <tr><td class="k"></td><td class="c">practiced · practiced_at</td><td class="n"></td></tr>
+          <tr><td class="k"></td><td class="c">bookmarked · bookmarked_at</td><td class="n"></td></tr>
+          <tr class="uq"><td class="k">UQ</td><td colspan="2">(user_id, f_id)</td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="cross">
+      It points at the <b>question</b>, never at a month row. That is why ticking
+      one card marks the same question practised in all twelve months it appears
+      in, and why progress survives a re-scrape. A row exists only while a flag is
+      set — clearing the last one deletes it.
+    </div>
+  </div>
+</div>
+
+<!-- ─────────────── operations ─────────────── -->
+<div class="group g-ops">
+  <h2>Labelling operations <span class="note">a run, the answers it produced, and the decisions taken on them</span></h2>
+  <div class="chain">
+    <div class="ent">
+      <table class="ent">
+        <caption>llm_jobs</caption>
+        <tr><td class="k pk">PK</td><td class="c">id</td><td class="n"></td></tr>
+        <tr><td class="k"></td><td class="c">kind</td><td class="n">llm · scrape</td></tr>
+        <tr><td class="k"></td><td class="c">task · provider · model · chunk</td><td class="n"></td></tr>
+        <tr><td class="k"></td><td class="c">scope</td><td class="n">JSON: how the questions were chosen</td></tr>
+        <tr><td class="k"></td><td class="c">status · done_chunks · answered</td><td class="n">polled by the browser</td></tr>
+        <tr><td class="k fk">FK</td><td class="c">batch_id</td><td class="n">→ review_batches · nullable</td></tr>
+        <tr><td class="k fk">FK</td><td class="c">created_by</td><td class="n">→ users</td></tr>
+      </table>
+    </div>
+    <div class="link">
+      <b>one ▸ one</b>
+      <div class="bar"></div>
+      <span>created before the first call, so a dead job still leaves its answers</span>
+    </div>
+    <div class="ent">
+      <table class="ent">
+        <caption>review_batches</caption>
+        <tr><td class="k pk">PK</td><td class="c">id</td><td class="n"></td></tr>
+        <tr><td class="k"></td><td class="c">name · field · tache</td><td class="n">theme · abstract · core_subject</td></tr>
+        <tr><td class="k fk">FK</td><td class="c">created_by</td><td class="n">→ users</td></tr>
+        <tr><td class="k"></td><td class="c">applied_at</td><td class="n">nullable</td></tr>
+      </table>
+    </div>
+    <div class="link">
+      <b>one ◂ many</b>
+      <div class="bar rev"></div>
+      <span>one item per question, holding every model's answer</span>
+    </div>
+    <div class="ent">
+      <table class="ent">
+        <caption>review_items</caption>
+        <tr><td class="k pk">PK</td><td class="c">id</td><td class="n"></td></tr>
+        <tr><td class="k fk">FK</td><td class="c">batch_id</td><td class="n">→ review_batches</td></tr>
+        <tr><td class="k fk">FK</td><td class="c">f_id</td><td class="n">→ fingerprints · <b>nullable</b></td></tr>
+        <tr><td class="k"></td><td class="c">candidates</td><td class="n">JSON: {model: answer}</td></tr>
+        <tr><td class="k"></td><td class="c">decision</td><td class="n">free text until applied</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="cross">
+    <b>Two deliberate loosenesses.</b> <code>f_id</code> is nullable because an
+    uploaded file may name a question the database does not have, and dropping
+    those rows silently would make the counts lie. <code>decision</code> is text
+    rather than a foreign key because a reviewer must be able to write a label the
+    vocabulary lacks — resolution happens at apply time, where what could not be
+    resolved is reported instead of invented.
+  </div>
+</div>
+
+<div class="foot">
+  <p><b>Everything a user or an editor touches hangs off <code>fingerprints</code></b> —
+  labels, progress, bookmarks and review items all point there, never at
+  <code>list_questions</code>. That single choice is what makes the timeline a
+  presentation layer rather than a source of truth.</p>
+  <p><b>Derived columns are recomputed, never incremented.</b>
+  <code>months_seen</code>, <code>total_sightings</code> and
+  <code>month_sightings</code> are recalculated from the rows that exist, so an
+  import that overlaps an earlier one cannot double-count.</p>
+</div>
+
+</div>
+</body>
+</html>

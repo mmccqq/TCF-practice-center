@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>TCF Practice Center · Pipeline Flow</title>
+<style>
+  /* Same four band hues as the architecture and ER posters — reference
+     categorical slots 1,2,3,7. Validated as a set: worst adjacent CVD ΔE 9.2,
+     normal-vision 27.6. Every band is labelled in text, so hue is never the
+     only thing carrying the grouping. */
+  :root{
+    --ink:#0b0b0b; --ink-2:#52514e; --ink-3:#767570;
+    --surface:#fcfcfb; --rule:#e2e1dc;
+    --intake:#eb6834; --intake-bg:#fdf1ec; --intake-line:#f7d5c5;
+    --label:#2a78d6;  --label-bg:#eef4fd;  --label-line:#cfe0f7;
+    --serve:#1baf7a;  --serve-ink:#14805a; --serve-bg:#ecf8f3; --serve-line:#c5e9da;
+    --human:#4a3aa7;  --human-bg:#f1effa;  --human-line:#d8d2f0;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:32px;background:var(--surface);color:var(--ink);
+       font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .sheet{max-width:1240px;margin:0 auto}
+  h1{font-size:24px;margin:0 0 4px;letter-spacing:-.01em}
+  .sub{color:var(--ink-2);margin:0 0 18px;max-width:82ch}
+
+  /* ---- the funnel strip: the whole pipeline as three numbers ---- */
+  .funnel{display:flex;align-items:stretch;border:1px solid var(--rule);
+          border-radius:10px;background:#fff;padding:13px 16px;margin-bottom:18px;gap:0}
+  .fstep{flex:none;min-width:150px}
+  .fstep .n{font:700 27px/1 -apple-system,BlinkMacSystemFont,sans-serif;letter-spacing:-.02em}
+  .fstep .l{font-size:12.5px;color:var(--ink-2);margin-top:3px}
+  .fstep .s{font-size:11.5px;color:var(--ink-3)}
+  .fgap{flex:1;display:flex;flex-direction:column;justify-content:center;
+        align-items:center;gap:3px;padding:0 14px;text-align:center}
+  .fgap .bar{width:100%;height:0;border-top:2px solid var(--ink-2);position:relative}
+  .fgap .bar::after{content:"";position:absolute;right:-1px;top:-6px;
+        border:6px solid transparent;border-left-color:var(--ink-2)}
+  .fgap .bar.rev::after{right:auto;left:-1px;border-left-color:transparent;border-right-color:var(--ink-2)}
+  .fgap em{font-style:normal;font-size:11.5px;color:var(--ink-3);line-height:1.3}
+  .fgap b{font-size:12px}
+
+  /* ---- bands ---- */
+  .band{border-radius:10px;border:1px solid;padding:13px 15px 15px;margin-bottom:13px}
+  .band>h2{font-size:13px;margin:0 0 11px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+  .band>h2 .note{font-weight:400;font-size:12px;color:var(--ink-3)}
+  .b-intake{background:var(--intake-bg);border-color:var(--intake-line)} .b-intake>h2{color:var(--intake)}
+  .b-label{background:var(--label-bg);border-color:var(--label-line)}    .b-label>h2{color:var(--label)}
+  .b-human{background:var(--human-bg);border-color:var(--human-line)}    .b-human>h2{color:var(--human)}
+  .b-serve{background:var(--serve-bg);border-color:var(--serve-line)}    .b-serve>h2{color:var(--serve-ink)}
+
+  /* ---- a row of steps with arrows between them ---- */
+  .flow{display:flex;align-items:stretch}
+  .step{flex:1;background:#fff;border:1px solid var(--rule);border-radius:8px;
+        padding:9px 11px 10px;min-width:0}
+  .step h3{font-size:12.5px;margin:0 0 5px;display:flex;gap:6px;align-items:baseline}
+  .step h3 .num{font:700 10px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;
+        color:#fff;background:var(--ink-2);border-radius:3px;padding:1px 4px;flex:none}
+  .step p{margin:0;font-size:12px;color:var(--ink-2);line-height:1.4}
+  .step p+p{margin-top:5px}
+  .step code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px}
+  .step .tag{display:inline-block;font-size:11px;color:var(--ink-3);
+        border:1px solid var(--rule);border-radius:4px;padding:0 5px;margin:5px 4px 0 0}
+  .arrow{flex:none;width:40px;display:flex;align-items:center;justify-content:center}
+  .arrow .bar{width:100%;height:0;border-top:2px solid var(--ink-2);position:relative}
+  .arrow .bar::after{content:"";position:absolute;right:-1px;top:-6px;
+        border:6px solid transparent;border-left-color:var(--ink-2)}
+
+  .why{border:1px dashed var(--ink-3);border-radius:8px;padding:8px 11px;
+       font-size:12px;color:var(--ink-2);margin-top:10px;background:#fff}
+  .why b{color:var(--ink)}
+  .why+.why{margin-top:7px}
+
+  /* ---- the loop back into the vocabulary ---- */
+  .loop{display:flex;align-items:center;gap:10px;margin:11px 0 0;
+        border:1px solid var(--human-line);background:#fff;border-radius:8px;padding:9px 12px}
+  .loop .badge{flex:none;font:700 11px ui-monospace,monospace;color:var(--human);
+        border:1.5px solid var(--human);border-radius:4px;padding:1px 6px}
+  .loop p{margin:0;font-size:12px;color:var(--ink-2)}
+  .loop b{color:var(--ink)}
+
+  .foot{border:1px solid var(--rule);border-radius:8px;padding:11px 14px;
+        font-size:12.5px;color:var(--ink-2)}
+  .foot p{margin:0 0 6px} .foot p:last-child{margin:0} .foot b{color:var(--ink)}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+</style>
+</head>
+<body>
+<div class="sheet">
+
+<h1>TCF Practice Center · Pipeline Flow</h1>
+<p class="sub">
+  One page of exam questions on a French tutoring site becomes one card in a
+  practice list. Between the two: a polite fetch, a collapse that decides what
+  counts as "the same question", two language models that disagree with each
+  other on purpose, and a person who only reads the cases where they did.
+</p>
+
+<div class="funnel">
+  <div class="fstep">
+    <div class="n" style="color:var(--intake)">8,438</div>
+    <div class="l">scraped sightings</div>
+    <div class="s">3 sources · 47 exam months</div>
+  </div>
+  <div class="fgap">
+    <b>collapse within a month</b>
+    <div class="bar"></div>
+    <em>18% of sightings were the same question filed twice in one month</em>
+  </div>
+  <div class="fstep">
+    <div class="n" style="color:var(--intake)">6,895</div>
+    <div class="l">month entries</div>
+    <div class="s">what the list renders</div>
+  </div>
+  <div class="fgap">
+    <b>collapse across months</b>
+    <div class="bar"></div>
+    <em>the average question recurs in 2.5 different exam months</em>
+  </div>
+  <div class="fstep">
+    <div class="n" style="color:var(--intake)">2,801</div>
+    <div class="l">distinct questions</div>
+    <div class="s">the unit that gets labelled</div>
+  </div>
+  <div class="fgap">
+    <b>label &amp; group</b>
+    <div class="bar"></div>
+    <em>16 themes → 131 core subjects, Task&nbsp;2</em>
+  </div>
+  <div class="fstep" style="min-width:132px">
+    <div class="n" style="color:var(--serve-ink)">89</div>
+    <div class="l">core subjects to revise</div>
+    <div class="s">the study plan</div>
+  </div>
+</div>
+
+<!-- ─────────────── 1. intake ─────────────── -->
+<div class="band b-intake">
+  <h2>Intake <span class="note">one button in the admin Data tab · runs on a background thread</span></h2>
+  <div class="flow">
+    <div class="step">
+      <h3><span class="num">1</span> Plan</h3>
+      <p>Re-read each site's index, list every month page, and subtract the
+         periods already in <code>raw_questions</code>.</p>
+      <p>The newest two months are always re-fetched — a site keeps adding
+         questions to the current month after publishing it.</p>
+      <span class="tag">≤ 12 pages / run</span><span class="tag">1s between requests</span>
+    </div>
+    <div class="arrow"><div class="bar"></div></div>
+    <div class="step">
+      <h3><span class="num">2</span> Fetch &amp; parse</h3>
+      <p>Each page is fetched, parsed in memory, and thrown away. Only the
+         questions are kept.</p>
+      <p>Per question: text, task 2 or 3, exam month, part, subject number, and
+         where it came from.</p>
+      <span class="tag">no HTML stored</span><span class="tag">progress per page</span>
+    </div>
+    <div class="arrow"><div class="bar"></div></div>
+    <div class="step">
+      <h3><span class="num">3</span> Fingerprint</h3>
+      <p>Normalise the wording — case, accents, spacing, punctuation — and hash
+         it. Two sites writing the same question differently land on one hash.</p>
+      <p>Scoped by task: the same sentence under Task&nbsp;2 and Task&nbsp;3 is
+         two different questions.</p>
+      <span class="tag">SHA-256</span>
+    </div>
+    <div class="arrow"><div class="bar"></div></div>
+    <div class="step">
+      <h3><span class="num">4</span> Load, three layers</h3>
+      <p>Group by <code>(task, hash)</code>. Write the question, then its
+         sightings, then one row per month it appeared in.</p>
+      <p>Counts are <b>recomputed</b> from the rows that now exist, never
+         incremented.</p>
+      <span class="tag">dry run first</span><span class="tag">re-runnable</span>
+    </div>
+  </div>
+  <div class="why">
+    <b>Why nothing is cached on the server.</b> A parse is a pure function of one
+    page, and the host wipes its disk on every restart — a cache there would be
+    rebuilt from nothing each run. Which months exist is already recorded in the
+    data, so the database <em>is</em> the cache. A routine run fetches one page,
+    not the hundred-odd in the archive.
+  </div>
+  <div class="why">
+    <b>Why re-running is safe.</b> Every write is keyed on something the source
+    already decided — the scraper's own id, the hash, the month — so an import
+    that overlaps an earlier one finds its rows already there. This is what lets
+    the import be a button rather than a procedure.
+  </div>
+</div>
+
+<!-- ─────────────── 2. labelling ─────────────── -->
+<div class="band b-label">
+  <h2>Labelling <span class="note">admin Labelling tab · one job at a time, ≤ 600 questions</span></h2>
+  <div class="flow">
+    <div class="step">
+      <h3><span class="num">5</span> Choose the questions</h3>
+      <p>Filter by task, theme, or what is missing — or tick rows and select all
+         that match.</p>
+      <p>A job defaults to questions that lack the field it is about: relabelling
+         what is already labelled is the expensive way to change nothing.</p>
+      <span class="tag">theme</span><span class="tag">abstract</span><span class="tag">core subject</span>
+    </div>
+    <div class="arrow"><div class="bar"></div></div>
+    <div class="step">
+      <h3><span class="num">6</span> Ask one or two models</h3>
+      <p>Questions go out in chunks. Each reply is checked position-by-position
+         against the ids that were sent, so a shifted answer is caught rather
+         than written to the wrong question.</p>
+      <p>Keys are typed into the dialog and passed as arguments — never stored
+         on the job, logged, or returned.</p>
+      <span class="tag">OpenAI · DeepSeek · Gemini · Anthropic</span>
+    </div>
+    <div class="arrow"><div class="bar"></div></div>
+    <div class="step">
+      <h3><span class="num">7</span> Merge into one batch</h3>
+      <p>Both models' answers land on the <b>same</b> review item, so an item
+         carries <code>{model: answer}</code> and a disagreement is visible
+         without a second pass.</p>
+      <p>The batch is created <em>before</em> the first call: a job that dies at
+         chunk 5 of 8 still leaves five chunks reviewable.</p>
+      <span class="tag">resumable by inspection</span>
+    </div>
+  </div>
+  <div class="why">
+    <b>Why two models instead of a better prompt.</b> A single model labelled
+    themes correctly about <b>85%</b> of the time against a hand-built gold set.
+    Filtering to where two models independently agree raises that to
+    <b>90–92%</b> — and, more usefully, it sorts the work: the ~10% they split on
+    is exactly the set worth a person's attention.
+  </div>
+</div>
+
+<!-- ─────────────── 3. review ─────────────── -->
+<div class="band b-human">
+  <h2>Review <span class="note">the only step with a person in it</span></h2>
+  <div class="flow">
+    <div class="step">
+      <h3><span class="num">8</span> Accept the agreed</h3>
+      <p>One click takes the answer wherever every run gave the same one — about
+         <b>90%</b> of a theme batch.</p>
+      <p>An item with a single candidate is left alone: one run agreeing with
+         itself is not agreement.</p>
+    </div>
+    <div class="arrow"><div class="bar"></div></div>
+    <div class="step">
+      <h3><span class="num">9</span> Adjudicate the split</h3>
+      <p>The reviewer sees the question, each model's answer, and how many other
+         questions already sit under each candidate.</p>
+      <p>They may type a label the vocabulary does not have — the decision is
+         free text until it is applied.</p>
+    </div>
+    <div class="arrow"><div class="bar"></div></div>
+    <div class="step">
+      <h3><span class="num">10</span> Apply</h3>
+      <p>Names are resolved to vocabulary rows and written onto the questions.
+         Applying twice is safe.</p>
+      <p>Anything that could not be resolved comes back as <b>unresolved</b>,
+         with its count and the theme it would need — not silently dropped, and
+         not invented.</p>
+    </div>
+  </div>
+  <div class="loop">
+    <span class="badge">LOOP</span>
+    <p><b>Unresolved labels feed the vocabulary, then the batch is applied again.</b>
+       On the first full pass this surfaced <b>63</b> labels the models had
+       invented; <b>31</b> named something real and became new core subjects,
+       and the rest were wrong. Refusing to auto-create them is what keeps the
+       vocabulary from drifting into 400 near-synonyms.</p>
+  </div>
+</div>
+
+<!-- ─────────────── 4. serve ─────────────── -->
+<div class="band b-serve">
+  <h2>Serve <span class="note">public pages · computed from the same tables, no export step</span></h2>
+  <div class="flow">
+    <div class="step">
+      <h3><span class="num">11</span> The month list</h3>
+      <p>Questions grouped into year-month sections, newest first, loaded as the
+         reader scrolls. Each card shows its theme and core subject.</p>
+    </div>
+    <div class="arrow"><div class="bar"></div></div>
+    <div class="step">
+      <h3><span class="num">12</span> The core set</h3>
+      <p>Labelled questions grouped by theme and core subject; a subject joins
+         the set once <b>two or more</b> distinct questions share it, ranked by
+         how many separate exam months it spans.</p>
+      <p>One representative question is shown; the rest expand in place.</p>
+    </div>
+    <div class="arrow"><div class="bar"></div></div>
+    <div class="step">
+      <h3><span class="num">13</span> Progress</h3>
+      <p>A tick is stored against the <b>question</b>, not the month row — so it
+         marks that question practised in every month it appears in, and it
+         survives the next re-scrape.</p>
+      <p>Progress counts core subjects, not cards.</p>
+    </div>
+  </div>
+  <div class="why">
+    <b>No publish step, by design.</b> The public pages read the same three tables
+    the admin writes, so applying a batch is live immediately; the only thing
+    between the two is a 60-second browser cache, which an admin edit invalidates
+    explicitly.
+  </div>
+</div>
+
+<div class="foot">
+  <p><b>Every stage is re-runnable and every stage reports what it did.</b>
+  Intake dry-runs before it writes, a labelling job survives its own death,
+  and apply names what it could not resolve. Nothing in this pipeline is a
+  one-shot script whose output you have to trust.</p>
+  <p><b>The expensive stage is bounded on purpose.</b> One job at a time, at most
+  600 questions, chunked — so a mistyped filter costs a few cents rather than an
+  afternoon's budget.</p>
+</div>
+
+</div>
+</body>
+</html>

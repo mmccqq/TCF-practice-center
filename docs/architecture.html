@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>TCF Practice Center · System Overview</title>
+<style>
+  /* Band hues are the reference categorical palette's slots 1,2,3,7, validated
+     as a set (worst adjacent CVD ΔE 9.2, normal-vision 27.6). Every band also
+     carries a visible label, which is the relief the aqua slot's sub-3:1
+     contrast requires. */
+  :root {
+    --ink:        #0b0b0b;
+    --ink-2:      #52514e;
+    --ink-3:      #767570;
+    --surface:    #fcfcfb;
+    --rule:       #e2e1dc;
+
+    --client:     #eb6834;  --client-bg:  #fdf1ec;  --client-line: #f7d5c5;
+    --api:        #2a78d6;  --api-bg:     #eef4fd;  --api-line:    #cfe0f7;
+    --store:      #1baf7a;  --store-bg:   #ecf8f3;  --store-line:  #c5e9da;
+    --ext:        #4a3aa7;  --ext-bg:     #f1effa;  --ext-line:    #d8d2f0;
+    --sys-bg:     #f4f4f2;  --sys-line:   #e2e1dc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px;
+    background: var(--surface); color: var(--ink);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  .sheet { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 24px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--ink-2); margin: 0 0 22px; max-width: 74ch; }
+
+  .band { border-radius: 10px; padding: 14px 16px 16px; border: 1px solid; }
+  .band > h2 {
+    font-size: 14px; margin: 0 0 10px; letter-spacing: -0.005em;
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  }
+  .band > h2 .note { font-weight: 400; font-size: 12px; color: var(--ink-3); }
+
+  .sys    { background: var(--sys-bg);    border-color: var(--sys-line); }
+  .client { background: var(--client-bg); border-color: var(--client-line); }
+  .client > h2 { color: var(--client); }
+  .api    { background: var(--api-bg);    border-color: var(--api-line); }
+  .api > h2 { color: var(--api); }
+  .store  { background: var(--store-bg);  border-color: var(--store-line); }
+  .store > h2 { color: #14805a; }
+  .ext    { background: var(--ext-bg);    border-color: var(--ext-line); }
+  .ext > h2 { color: var(--ext); }
+
+  .row { display: grid; gap: 10px; }
+  .r2 { grid-template-columns: repeat(2, 1fr); }
+  .r3 { grid-template-columns: repeat(3, 1fr); }
+  .r4 { grid-template-columns: repeat(4, 1fr); }
+  .r5 { grid-template-columns: repeat(5, 1fr); }
+  .row + .row { margin-top: 10px; }
+
+  .card {
+    background: #fff; border: 1px solid; border-radius: 8px; padding: 9px 11px;
+  }
+  .client .card { border-color: var(--client-line); }
+  .api .card    { border-color: var(--api-line); }
+  .store .card  { border-color: var(--store-line); }
+  .ext .card    { border-color: var(--ext-line); }
+  .sys .card    { border-color: var(--sys-line); }
+  .card b { display: block; font-size: 13px; margin-bottom: 2px; }
+  .card span { display: block; font-size: 12px; color: var(--ink-2); }
+  .card.lead { background: #fff8f4; }
+  .api .card.lead { background: #f6faff; }
+
+  .pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .pill {
+    background: #fff; border: 1px solid var(--api-line); border-radius: 999px;
+    padding: 3px 10px; font-size: 12px; color: var(--api);
+  }
+  .pill.admin { border-color: var(--ext-line); color: var(--ext); }
+
+  /* arrows between bands: two labelled columns, drawn with a rule + glyph */
+  .flow { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; padding: 2px 40px; }
+  .arrow { display: flex; align-items: center; gap: 12px; }
+  /* the arrow has to read as flow at a glance, so it is the heaviest ink in
+     the gap between bands - thin hairlines disappear next to the filled cards */
+  .arrow .stem {
+    width: 0; flex: none; border-left: 2px solid var(--ink-2);
+    height: 44px; margin-left: 14px; position: relative;
+  }
+  .arrow .stem::after {
+    content: ""; position: absolute; left: -6px; bottom: -2px;
+    border: 6px solid transparent; border-top-color: var(--ink-2);
+  }
+  .arrow.up .stem::after { bottom: auto; top: -2px; border-top-color: transparent; border-bottom-color: var(--ink-2); }
+  .arrow p { margin: 0; font-size: 12px; }
+  .arrow b { font-size: 12px; }
+  .arrow span { color: var(--ink-3); }
+
+  .foot {
+    margin-top: 18px; border: 1px solid var(--rule); border-radius: 8px;
+    padding: 11px 14px; font-size: 12.5px; color: var(--ink-2);
+    display: flex; gap: 14px; flex-wrap: wrap; align-items: baseline;
+  }
+  .foot b { color: var(--ink); }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <h1>TCF Practice Center · System Overview</h1>
+  <p class="sub">
+    A preparation platform for the TCF Canada speaking exam. One Docker image on
+    Render serves the React bundle and the API from a single origin; Postgres on
+    Neon holds a four-layer question model. Scraping, labelling and review all run
+    from the admin system inside the browser.
+  </p>
+
+  <!-- ───────────────────────── sources ───────────────────────── -->
+  <div class="band sys">
+    <h2>Public sources <span class="note">crawled on demand — only months the bank does not have</span></h2>
+    <div class="row r4">
+      <div class="card"><b>reussir</b><span>monthly Task 2 / 3 pages</span></div>
+      <div class="card"><b>formation</b><span>monthly hub + month pages</span></div>
+      <div class="card"><b>opal</b><span>archive, sha256 manifest</span></div>
+      <div class="card"><b>Google Identity</b><span>OAuth2 authorization-code</span></div>
+    </div>
+  </div>
+
+  <div class="flow">
+    <div class="arrow"><div class="stem"></div><p><b>fetch index, then new month pages only</b><br>
+      <span>parsed in memory — no HTML is stored</span></p></div>
+    <div class="arrow"><div class="stem"></div><p><b>sign-in redirect</b><br>
+      <span>callback returns a session JWT in the URL fragment</span></p></div>
+  </div>
+
+  <!-- ───────────────────────── client ───────────────────────── -->
+  <div class="band client">
+    <h2>React SPA <span class="note">React 19 · Vite · TanStack Query · Tailwind v4 — served by the same process as the API</span></h2>
+    <div class="row r5">
+      <div class="card lead"><b>Oral core set</b><span>89 subjects ranked by exam months; expand for the rest</span></div>
+      <div class="card"><b>Task 2 / 3 list</b><span>month sections · infinite scroll · theme filter</span></div>
+      <div class="card"><b>Bookmarks</b><span>saved questions, newest first</span></div>
+      <div class="card"><b>Home</b><span>hero, progress, entry points</span></div>
+      <div class="card"><b>Auth</b><span>email + Google, <code>?next=</code> return</span></div>
+    </div>
+    <div class="row r3">
+      <div class="card lead"><b>Admin · Data / Runs</b><span>one-action scrape→parse→load; job list with live progress, cancel, interrupted-job recovery</span></div>
+      <div class="card lead"><b>Admin · Labelling / Vocabulary</b><span>filter, inline and bulk edit, xlsx export; themes and core subjects with usage counts</span></div>
+      <div class="card lead"><b>Admin · Review / Compare</b><span>adjudicate answers; two models land in one batch and apply in a single pass</span></div>
+    </div>
+    <div class="row r2">
+      <div class="card"><b>lib/progress.jsx</b><span>practised + bookmarked as optimistic mutations, keyed on the question</span></div>
+      <div class="card"><b>lib/api.js</b><span>fetch wrapper, bearer token, blob downloads, the invalidation list</span></div>
+    </div>
+  </div>
+
+  <div class="flow">
+    <div class="arrow"><div class="stem"></div><p><b>REST · bearer JWT</b><br>
+      <span>50 endpoints; <code>/api/admin/*</code> gated on <code>users.is_admin</code></span></p></div>
+    <div class="arrow up"><div class="stem"></div><p><b>JSON · .xlsx export</b><br>
+      <span>list rows carry both ids: the month row and the question</span></p></div>
+  </div>
+
+  <!-- ───────────────────────── backend ───────────────────────── -->
+  <div class="band api">
+    <h2>FastAPI backend <span class="note">SQLAlchemy 2.0 · Alembic · 50 endpoints across 6 routers</span></h2>
+    <div class="row" style="grid-template-columns:1fr">
+      <div class="card">
+        <b>routers/</b>
+        <div class="pills" style="margin-top:6px">
+          <span class="pill">/questions · 5</span>
+          <span class="pill">/auth · 7</span>
+          <span class="pill">/progress · 2</span>
+          <span class="pill">/attempts · 2</span>
+          <span class="pill">/bookmarks · 3</span>
+          <span class="pill admin">/admin/questions · 6</span>
+          <span class="pill admin">/admin/reviews · 9</span>
+          <span class="pill admin">/admin/vocabulary + themes + core-subjects · 8</span>
+          <span class="pill admin">/admin/jobs · 3</span>
+          <span class="pill admin">/admin/scrape · 1</span>
+          <span class="pill admin">/admin/compare · 1</span>
+        </div>
+      </div>
+    </div>
+    <div class="row r2">
+      <div class="card lead"><b>scrape_runner.py</b><span>compares each source's index against the months already stored, fetches the gap, parses in memory, loads all three layers</span></div>
+      <div class="card lead"><b>llm_runner.py</b><span>labelling jobs on a daemon thread; one provider or two into a single review batch; 600-question ceiling, cancel, startup reap of interrupted jobs</span></div>
+    </div>
+    <div class="row r4">
+      <div class="card"><b>auth.py</b><span>bcrypt · HS256 · <code>current_admin</code></span></div>
+      <div class="card"><b>models.py</b><span>the four layers + vocabulary, progress, jobs, review</span></div>
+      <div class="card"><b>migrations/</b><span>Alembic; a six-step expand/contract move lives here</span></div>
+      <div class="card"><b>CLI</b><span>backfill · load_labels · load_vocabulary · make_admin</span></div>
+    </div>
+  </div>
+
+  <div class="flow">
+    <div class="arrow"><div class="stem"></div><p><b>SQLAlchemy · psycopg</b><br>
+      <span>Neon direct host, <code>pool_pre_ping</code> for idle suspension</span></p></div>
+    <div class="arrow"><div class="stem"></div><p><b>chunked prompts · JSON-mode replies</b><br>
+      <span>resume-by-id, positional alignment checks</span></p></div>
+  </div>
+
+  <div class="row r2" style="align-items:start">
+    <!-- ───────────────────── storage ───────────────────── -->
+    <div class="band store">
+      <h2>PostgreSQL · Neon <span class="note">10 tables</span></h2>
+      <div class="row r3">
+        <div class="card"><b>raw_questions</b><span>one scraped sighting · 4,386 for Task 2</span></div>
+        <div class="card"><b>fingerprints</b><span>one unique text · 1,541 · labels live here</span></div>
+        <div class="card"><b>list_questions</b><span>one row per month · 3,591</span></div>
+      </div>
+      <div class="row r3">
+        <div class="card"><b>themes · core_subjects</b><span>controlled vocabulary, FK-enforced</span></div>
+        <div class="card"><b>users · user_questions</b><span>accounts; practised and bookmarked, keyed on the question</span></div>
+        <div class="card"><b>review_batches · items · llm_jobs</b><span>adjudication and run history</span></div>
+      </div>
+    </div>
+
+    <!-- ───────────────────── external ───────────────────── -->
+    <div class="band ext">
+      <h2>Model providers <span class="note">chosen per run; key from the server or pasted in the dialog</span></h2>
+      <div class="row r2">
+        <div class="card"><b>OpenAI</b><span>JSON-schema mode, batch API</span></div>
+        <div class="card"><b>DeepSeek</b><span>JSON-object mode, no batch</span></div>
+        <div class="card"><b>Gemini</b><span>OpenAI-compatible endpoint</span></div>
+        <div class="card"><b>Anthropic</b><span>prompt caching, batch API</span></div>
+      </div>
+      <div class="row" style="grid-template-columns:1fr">
+        <div class="card"><b>Agreement as triage</b><span>two models on the same questions; the answers they share are accepted in one action, and only the split ones reach a person. 85–86% single-model against a hand-built gold set, 90–92% agreement-filtered.</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span><b>Identity</b> a question is its normalised SHA-256 fingerprint — <code>(tache, fingerprint)</code>, since the same wording under Task 2 and Task 3 is two questions.</span>
+    <span><b>Frequency</b> counted in distinct exam months, not scraped reports: 18% of month-entries were filed by more than one source.</span>
+  </div>
+
+</div>
+</body>
+</html>
