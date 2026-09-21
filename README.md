@@ -5,7 +5,7 @@ questions* rather than generic French practice. Questions are scraped from three
 public sources, deduplicated across them, labelled with an LLM-assisted pipeline,
 and served as a frequency-ranked core set.
 
-**Live:** [happytcf.com](https://happytcf.com)
+**Live:** [happytcf.onrender.com](https://happytcf.onrender.com)(take 30s to wake the service on Render)
 
 The product claim is compression. 4,386 scraped sightings of Task 2 questions
 collapse into 1,541 distinct questions, which group into **89 core subjects** —
