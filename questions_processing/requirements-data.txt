@@ -32,3 +32,8 @@ numpy>=1.26
 #                                     endpoint; free key from aistudio.google.com)
 anthropic>=1.4
 openai>=2.0
+
+# jev_core_subject.py - TypeSafe's Jev for the core_subject task. Optional and
+# experimental: nothing else imports it, so skip this unless you are running
+# that script.  TYPESAFE_API_KEY
+typesafe-sdk>=0.7

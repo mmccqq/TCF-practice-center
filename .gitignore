@@ -24,6 +24,9 @@ raw_opal/
 raw_reussir/
 raw/
 .hf-cache/
+# embedding vectors, keyed by model+text - rebuilt on demand, and for a
+# hosted model it is the file that stops a re-run billing again
+questions_processing/.embed_cache/
 
 # os
 .DS_Store

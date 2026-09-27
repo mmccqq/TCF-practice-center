@@ -1,9 +1,13 @@
 <!DOCTYPE html>
 <!--
-  Hand-review queue for deduplication.py's *_review.jsonl files.
+  Hand-review queue for deduplication.py's *_review.jsonl files, and for any
+  pair list pair_scores.py writes with --review.
 
       python3 deduplication.py questions_*/tache2.jsonl --mode tfidf
       open review.html          # then pick tache2_tfidf_review.jsonl
+
+      python3 pair_scores.py questions_*/tache2.jsonl labels_theme.jsonl \
+          --min 0.75 --review -o pairs_review.jsonl
 
   A single self-contained file on purpose: no build step, no server, no
   dependency to keep current. It is a tool for the person maintaining the
@@ -119,6 +123,13 @@
     font: 11.5px ui-monospace, Menlo, monospace; border: 1px solid var(--line);
     border-radius: 4px; padding: 1px 6px;
   }
+  /* theme and abstract on a dedup side, when pair_scores.py supplied them */
+  .sidelabels {
+    display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline;
+    margin-bottom: 8px;
+  }
+  .sidelabels .pairtag { background: var(--card); }
+  .sidelabels .sideabstract { font-size: 13px; color: var(--muted); }
 
   kbd {
     font: 11px ui-monospace, Menlo, monospace; border: 1px solid var(--line);
@@ -153,6 +164,7 @@
   <div id="empty" class="empty">
     <p>Drop a file anywhere on this page, or pick one:</p>
     <p><code>*_review.jsonl</code> from <code>deduplication.py</code> &mdash; are these two questions the same?<br>
+       <code>--review</code> output from <code>pair_scores.py</code> &mdash; the same, with each side&rsquo;s theme and abstract.<br>
        <code>*_disagreements.jsonl</code> from <code>compare.py</code> &mdash; which label is right?</p>
     <p><kbd>j</kbd> / <kbd>k</kbd> move &nbsp; <kbd>m</kbd>/<kbd>r</kbd> merge/reject &nbsp;
        <kbd>1</kbd>&hellip;<kbd>9</kbd> pick a label &nbsp; <kbd>u</kbd> undo</p>
@@ -219,7 +231,7 @@ function renderDiff(parts) {
 }
 
 // -------------------------------------------------------------- render ----
-function side(label, id, parts) {
+function side(label, id, parts, info) {
   const box = document.createElement("div");
   box.className = "side";
   const h = document.createElement("h3");
@@ -228,10 +240,35 @@ function side(label, id, parts) {
   idEl.className = "id";
   idEl.textContent = id;
   h.append(idEl);
+  box.append(h);
+
+  // pair_scores.py --review carries a_theme/a_abstract and b_theme/b_abstract
+  // through from the label files. deduplication.py's own review files have
+  // neither, and then this block simply produces nothing - the two shapes stay
+  // one queue rather than becoming two pages.
+  const { theme, abstract } = info ?? {};
+  if (theme || abstract) {
+    const tags = document.createElement("div");
+    tags.className = "sidelabels";
+    if (theme) {
+      const t = document.createElement("span");
+      t.className = "pairtag";
+      t.textContent = theme;            // textContent: model-generated text
+      tags.append(t);
+    }
+    if (abstract) {
+      const a = document.createElement("span");
+      a.className = "sideabstract";
+      a.textContent = abstract;
+      tags.append(a);
+    }
+    box.append(tags);
+  }
+
   const body = document.createElement("div");
   body.className = "text";
   body.append(renderDiff(parts));
-  box.append(h, body);
+  box.append(body);
   return box;
 }
 
@@ -315,7 +352,8 @@ function card(p, index) {
     const row = document.createElement("div");
     row.className = "pair";
     const [la, rb] = diffWords(p.a ?? "", p.b ?? "");
-    row.append(side("A", p.a_id ?? "?", la), side("B", p.b_id ?? "?", rb));
+    row.append(side("A", p.a_id ?? "?", la, { theme: p.a_theme, abstract: p.a_abstract }),
+               side("B", p.b_id ?? "?", rb, { theme: p.b_theme, abstract: p.b_abstract }));
     el.append(row);
 
     const actions = document.createElement("div");

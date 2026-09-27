@@ -60,6 +60,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import re
 import sys
 import unicodedata
@@ -83,9 +84,25 @@ if TYPE_CHECKING:                     # numpy is only needed by the semantic
 # 0.93 / 0.82 pair merged unrelated questions and flagged 100% of pairs for
 # review. At 0.95 the merges spot-check as genuine rewordings.
 AUTO_MERGE = 0.95   # >= this cosine  -> merged without review ("duplicate")
-REVIEW_LOW = 0.94   # [LOW, MERGE)    -> flagged as near-duplicate, NOT merged
+REVIEW_LOW = 0.90   # [LOW, MERGE)    -> flagged as near-duplicate, NOT merged
 MAX_CLUSTER = 6     # belt-and-braces cap; complete linkage is the real guard
-EMBED_MODEL = "intfloat/multilingual-e5-large"
+#EMBED_MODEL = "intfloat/multilingual-e5-large"
+EMBED_MODEL = "Qwen/Qwen3-Embedding-0.6B"
+
+# A hosted model is addressed as `provider:model`, e.g.
+# `openai:text-embedding-3-large`. An explicit prefix rather than a guess from
+# the shape of the name, because a local model can look exactly like a hosted
+# one: `paraphrase-multilingual-MiniLM-L12-v2` has no slash in it either.
+API_EMBED_PREFIX = "openai:"
+
+# Per-request ceilings for OpenAI's embeddings endpoint (2,048 inputs and
+# ~300k tokens). Both are budgeted rather than just the count: 2,048 short
+# questions fit in one request and 2,048 long ones do not.
+OPENAI_BATCH_INPUTS = 1000
+OPENAI_BATCH_TOKENS = 200_000
+
+# One .npz per model, beside this file. See _embed_cached().
+EMBED_CACHE = Path(__file__).resolve().parent / ".embed_cache"
 
 # TF-IDF cosines live on a completely different scale and need their own pair,
 # so --mode tfidf swaps these in unless --auto-merge/--review-low are given.
@@ -327,7 +344,8 @@ def tfidf(texts: list[str], ngram: int = 2) -> "np.ndarray":
     return X
 
 
-def embed(texts: list[str], model_name: str) -> "np.ndarray":
+def embed_local(texts: list[str], model_name: str) -> "np.ndarray":
+    """Vectors from a sentence-transformers model on this machine."""
     import numpy as np
 
     try:
@@ -335,9 +353,11 @@ def embed(texts: list[str], model_name: str) -> "np.ndarray":
     except ModuleNotFoundError:
         raise SystemExit(
             "sentence-transformers is not installed, so --mode embed "
-            "cannot run.\n"
+            "cannot run with a local model.\n"
             "  - for a near-duplicate tier with no download:  --mode tfidf\n"
             "  - for exact duplicates only:                   --mode exact\n"
+            "  - for a hosted model instead (no download):\n"
+            "        -m openai:text-embedding-3-large\n"
             "  - to enable it:  pip install sentence-transformers\n"
             f"    (then optionally a smaller model than the {model_name} "
             "default:\n"
@@ -350,6 +370,137 @@ def embed(texts: list[str], model_name: str) -> "np.ndarray":
     vecs = model.encode(prefixed, batch_size=64, show_progress_bar=True,
                         normalize_embeddings=True)
     return np.asarray(vecs, dtype=np.float32)
+
+
+def _openai_batches(texts: list[str]):
+    """Split into requests that respect both endpoint ceilings."""
+    batch: list[str] = []
+    tokens = 0
+    for t in texts:
+        # ~3 characters per token for French, plus slack. A rough estimate is
+        # enough: the point is to stay under a hard limit, not to predict cost.
+        est = len(t) // 3 + 8
+        if batch and (len(batch) >= OPENAI_BATCH_INPUTS
+                      or tokens + est > OPENAI_BATCH_TOKENS):
+            yield batch
+            batch, tokens = [], 0
+        batch.append(t)
+        tokens += est
+    if batch:
+        yield batch
+
+
+def embed_openai(texts: list[str], model_name: str) -> "np.ndarray":
+    """Vectors from OpenAI's embeddings endpoint.
+
+    The key comes from the environment, exactly as llm.py reads it - one place
+    to set a key for every tool in this directory.
+    """
+    import numpy as np
+
+    try:
+        import openai
+    except ModuleNotFoundError:
+        raise SystemExit("`pip install openai` to use an openai: model") from None
+
+    if not os.environ.get("OPENAI_API_KEY"):
+        raise SystemExit(
+            "OPENAI_API_KEY is not set, so openai: embeddings cannot run.\n"
+            "  export OPENAI_API_KEY=...          (the variable llm.py uses)\n"
+            "  - or stay local:  -m Qwen/Qwen3-Embedding-0.6B\n"
+            "  - or no model at all:  --mode tfidf")
+
+    client = openai.OpenAI()
+    out: list[list[float]] = []
+    batches = list(_openai_batches(texts))
+    for n, batch in enumerate(batches, 1):
+        print(f"openai {model_name}: request {n}/{len(batches)} "
+              f"({len(batch):,} text(s))", file=sys.stderr)
+        reply = client.embeddings.create(model=model_name, input=batch)
+        # The response is documented as ordered by index, but this is the one
+        # misalignment that would mislabel every vector without erroring, so it
+        # is sorted rather than trusted - same reasoning as llm.py's
+        # parse_chunk().
+        out.extend(d.embedding for d in sorted(reply.data, key=lambda d: d.index))
+    return np.asarray(out, dtype=np.float32)
+
+
+def _cache_path(model_name: str) -> Path:
+    return EMBED_CACHE / (re.sub(r"[^A-Za-z0-9._-]", "_", model_name) + ".npz")
+
+
+def _embed_cached(texts: list[str], model_name: str, compute) -> "np.ndarray":
+    """`compute(missing)` is called only for text this model has not seen.
+
+    Why cache at all: the normal workflow re-runs. pair_scores.py is run
+    several times over one corpus at different --min to find where the
+    thresholds belong, and deduplication.py is re-run after a parser change.
+    A hosted model bills for each of those; a local one costs minutes of CPU.
+    Both are avoidable, because the same text under the same model gives the
+    same vector.
+
+    Keyed on sha256(model + text), so two models never share an entry and an
+    edited question is simply a new key - nothing to invalidate. The store is
+    one .npz per model: `keys` as hex digests, `vecs` as the matrix they index.
+    """
+    import numpy as np
+
+    path = _cache_path(model_name)
+    store: dict[str, "np.ndarray"] = {}
+    if path.exists():
+        try:
+            z = np.load(path, allow_pickle=False)
+            store = {str(k): v for k, v in zip(z["keys"], z["vecs"])}
+        except Exception as exc:              # noqa: BLE001
+            # a truncated or stale-format file is a cache, not data: say so and
+            # recompute rather than failing a run over it
+            print(f"ignoring unreadable cache {path.name}: {exc}", file=sys.stderr)
+
+    def key(text: str) -> str:
+        return hashlib.sha256(f"{model_name}\x00{text}".encode()).hexdigest()
+
+    keys = [key(t) for t in texts]
+    # dict.fromkeys keeps first-seen order and drops repeats - the same text
+    # twice is one call, not two
+    todo = list(dict.fromkeys(t for t, k in zip(texts, keys) if k not in store))
+    if todo:
+        if store:
+            print(f"{len(texts) - len(todo):,} of {len(texts):,} vectors cached, "
+                  f"{len(todo):,} to compute", file=sys.stderr)
+        fresh = compute(todo)
+        for t, v in zip(todo, fresh):
+            store[key(t)] = v
+        EMBED_CACHE.mkdir(exist_ok=True)
+        np.savez(path, keys=np.array(list(store)),
+                 vecs=np.stack(list(store.values())))
+
+    return np.stack([store[k] for k in keys])
+
+
+def embed(texts: list[str], model_name: str) -> "np.ndarray":
+    """L2-normalised rows for `texts`, local or hosted.
+
+        -m Qwen/Qwen3-Embedding-0.6B          on this machine
+        -m openai:text-embedding-3-large      over the API
+    """
+    import numpy as np
+
+    if model_name.startswith(API_EMBED_PREFIX):
+        hosted = model_name[len(API_EMBED_PREFIX):]
+        vecs = _embed_cached(texts, model_name,
+                             lambda batch: embed_openai(batch, hosted))
+    else:
+        vecs = _embed_cached(texts, model_name,
+                             lambda batch: embed_local(batch, model_name))
+
+    # Normalised once here, for both paths. semantic_pass() and pair_scores.py
+    # both treat the dot product AS the cosine, so this is the line that has to
+    # be true - and neither source guarantees it on its own: OpenAI returns
+    # unit vectors today but not when `dimensions` shortens them, and a cached
+    # vector may predate whatever the local model was asked to do.
+    vecs = np.asarray(vecs, dtype=np.float32)
+    norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+    return vecs / np.where(norms == 0.0, 1.0, norms)
 
 
 def semantic_pass(reps: list[Question], vecs: "np.ndarray",
@@ -529,7 +680,9 @@ def main() -> None:
     ap.add_argument("-r", "--review", type=Path,
                     help="default: the same, with _review before the extension")
     ap.add_argument("-m", "--model", default=EMBED_MODEL,
-                    help="sentence-transformers model, --mode embed only")
+                    help="--mode embed only: a sentence-transformers model, or "
+                         "openai:<model> for the hosted endpoint "
+                         "(e.g. openai:text-embedding-3-large)")
     ap.add_argument("--mode", choices=tuple(MODE_TAGS), default="embed",
                     help="how to find near-duplicates on top of tiers 0-1: "
                          "'embed' (default) = sentence embeddings, best at "
