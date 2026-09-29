@@ -134,8 +134,8 @@ class Task:
 RULES_THEME = """\
 You classify French TCF Canada Tâche 2 role-play prompts by theme. Each prompt describes a situation: a role for the examiner(Je), a role for the candidate(Tu, vous), and candidate need to ask questions to get information about this situation. Almost all of them share the same structure (“I am your friend... You ask me questions...”).
 Read the situation, identify the subject and classify it using the themes below.
-The parenthetical hint list at the end of each prompt is the strongest signal available for finding a subject. 
-When two rules seem to fit, decide by asking which rule the HINTS point to, not the narrative.
+The parenthetical hint list at the end of each prompt is the strongest signal available for confirming a theme. 
+When two rules seem to fit, decide by asking which rule the Parenthetical Hint point to, not the narrative.
 THEME (17 values):
 Travel & tourism: Is it travel, trip the subject? Including tour plans, city sightseeing, someone's recent trip, getting to know a city, language trip. does not cover: A trip taken for sport → Sports & fitness. a flat renting out is housing & real estate.
 Culture & entertainment: Are a specific cultural place or one-time public activity the subject? Places like Museums, libraries, cinemas as venues, theme parks, zoos and nature parks, board-game clubs, or activities like public festivals, concerts, shows, local customs and how people spend their evenings. does not cover: The content of a film or book → Media & reading; a municipal arts class → Education & courses

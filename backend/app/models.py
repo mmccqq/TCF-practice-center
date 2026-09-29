@@ -8,7 +8,7 @@ from __future__ import annotations
 import datetime as dt
 
 from sqlalchemy import (JSON, Boolean, DateTime, ForeignKey, Index, Integer,
-                        String, Text, UniqueConstraint)
+                        LargeBinary, String, Text, UniqueConstraint)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import List, Optional
 
@@ -381,4 +381,44 @@ class UserQuestion(Base):
         UniqueConstraint("user_id", "f_id", name="uq_user_question_user_f"),
         # "my bookmarks, newest first" - the bookmarks page's only query
         Index("ix_user_questions_user_bookmarked", "user_id", "bookmarked_at"),
+    )
+
+
+class FingerprintEmbedding(Base):
+    """One question's vector, for the labelling agent's find_similar tool.
+
+    A separate table rather than a column on `fingerprints`, for two reasons.
+    The list page selects over fingerprints on every request and would drag a
+    6 KB blob along for nothing. And the key below lets one question hold
+    several vectors at once - 3-small and 3-large, raw text and abstract - so
+    comparing retrievers is an extra row, not a destructive migration.
+
+    The vector is packed float32, **already L2-normalised at write time**.
+    That is the whole reason the search is one matmul: with unit vectors,
+    cosine similarity is the dot product, so `M @ q` scores the entire corpus
+    with no norms and no division. A vector written un-normalised would score
+    plausibly and wrongly, so normalise in `store.py`, never here.
+
+    Vectors from different models are not comparable and mixing them raises no
+    error - it just returns nonsense - which is why `model` and `source` are in
+    the primary key and every read filters on both.
+    """
+
+    __tablename__ = "fingerprint_embeddings"
+
+    f_id: Mapped[int] = mapped_column(
+        ForeignKey("fingerprints.id", ondelete="CASCADE"), primary_key=True)
+    # "text-embedding-3-small". Not a default: a wrong guess here is silent.
+    model: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # which field was embedded - "text" or "abstract"
+    source: Mapped[str] = mapped_column(String(16), primary_key=True)
+    dim: Mapped[int] = mapped_column(Integer)
+    # float32, little-endian, len == dim * 4. np.frombuffer reads it directly.
+    vec: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True),
+                                                    default=utcnow)
+
+    __table_args__ = (
+        # the index load reads one (model, source) pair at a time
+        Index("ix_fingerprint_embeddings_model_source", "model", "source"),
     )

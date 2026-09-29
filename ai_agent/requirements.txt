@@ -1,0 +1,22 @@
+# The labelling agent runs from a laptop, not on Render.
+#
+# Deliberately NOT in backend/requirements.txt: langgraph and langchain pull
+# in a large dependency tree, and the Docker image that serves the app has no
+# use for them. numpy is here for the same reason - the embedding search is a
+# local tool, and the web process does not do it.
+#
+#   .venv/bin/pip install -r ai_agent/requirements.txt
+#
+# sqlalchemy, pydantic-settings and python-dotenv come from
+# backend/requirements.txt; the agent imports app.db to reuse the engine and
+# the DATABASE_URL handling rather than opening its own connection.
+
+numpy>=2.0
+openai>=1.100
+
+# only needed for --runtime langgraph
+langgraph>=1.0
+langchain-openai>=1.0
+
+# tests
+pytest>=8.0
