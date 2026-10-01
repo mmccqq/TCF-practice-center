@@ -945,6 +945,14 @@ def cmd_selftest(_args) -> None:
         assert [r["id"] for r in pending(inp, out, None)] == ["2"], "already-done ids must be skipped"
         assert read_jsonl(out)[0]["theme"] == "work"
 
+    # a note keyed on a theme or label the vocabulary lacks is silently
+    # dropped by subject_notes(), so say so here instead
+    from llm_tasks import SUBJECT_NOTES, VOCABULARY
+    for theme, notes in SUBJECT_NOTES.items():
+        assert theme in VOCABULARY, f"SUBJECT_NOTES theme {theme!r} not in VOCABULARY"
+        stray = set(notes) - set(VOCABULARY[theme])
+        assert not stray, f"SUBJECT_NOTES[{theme!r}] names labels not in VOCABULARY: {sorted(stray)}"
+
     print(f"selftest passed ({len(TASKS)} tasks x {len(PROVIDERS)} providers)")
 
 

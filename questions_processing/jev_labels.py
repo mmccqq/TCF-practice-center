@@ -2,17 +2,111 @@
 """
 Theme and core_subject labelling with TypeSafe's Jev, scored against a gold set.
 
+    pip install typesafe-sdk
     export TYPESAFE_API_KEY=...
 
-    # the gold test: ask with the gold file's own vocabulary and score against it
+Usage
+-----
+    # the gold test: offer the gold file's own labels and score against them
     python3 jev_labels.py gold_set/tache2_gold.jsonl --vocab input
 
-    # the same questions, but offered today's 16 themes instead
+    # the same questions, offered the themes in llm_tasks.VOCABULARY
     python3 jev_labels.py gold_set/tache2_gold.jsonl
 
-    # core_subject, from the database (it needs a theme per question)
+    # ... or the themes the database has now, if the two have drifted
+    python3 jev_labels.py gold_set/tache2_gold.jsonl --vocab db
+
+    # core_subject against a hand-labelled gold file (every row needs a theme)
+    python3 jev_labels.py gold_set/Sheet1.jsonl --task core_subject
+
+    # text in one file, labels in another - merged by id
+    python3 jev_labels.py questions_reussir/tache2.jsonl labels.jsonl
+
+    # re-score the database's own labels: the stored label is the gold
     python3 jev_labels.py --from-db --task core_subject --limit 200
-    python3 jev_labels.py --from-db --task core_subject --unlabelled -o jev.jsonl
+
+    # label what is missing, for load_labels.py or the admin upload
+    python3 jev_labels.py --from-db --task core_subject --unlabelled
+
+    # one theme, without the worked examples in the instructions
+    python3 jev_labels.py --from-db --task core_subject \
+        --theme "Travel & tourism" --no-examples
+
+Parameters
+----------
+    input ...               JSONL file(s) - see Input below. Give input files
+                            or --from-db, exactly one of the two.
+
+    --task {theme,core_subject}
+                            what to label. Default: theme.
+
+    --from-db               read the questions from the database instead of
+                            files. Without --unlabelled this takes questions
+                            that already HAVE the label, and scores against it.
+
+    --unlabelled            with --from-db: take questions MISSING the label
+                            instead. There is nothing to score, so the labels
+                            are written out (stdout, or -o).
+
+    --vocab db|input|PATH   where the options come from:
+                              (unset)  llm_tasks.VOCABULARY - its themes, or
+                                       for core_subject each theme's own list.
+                                       The file you edit, so a change is
+                                       testable before load_vocabulary.py runs
+                              db       the themes / core_subjects tables - what
+                                       the admin and the bank actually use
+                              input    every distinct label in the input files
+                              PATH     every distinct label in another file
+                            For input and PATH, the label field read is --field
+                            if given, else the first of <task>, theme,
+                            core_subject, topic, gold, label, and core_subject
+                            options are one flat list rather than one per theme.
+
+    --field NAME            which field holds the gold label. Default: the
+                            task's own name if present, else the first of
+                            theme, core_subject, topic, gold, label - except
+                            that a core_subject run never takes `theme`.
+
+    --tache N               task number. Default: 2. Chooses the questions
+                            with --from-db, and the tables with --vocab db.
+                            llm_tasks.VOCABULARY is Task 2's, so any other
+                            task needs --vocab db (or input / PATH).
+
+    --theme NAME            only questions with this theme (exact name).
+
+    --limit N               at most N questions. From the database: most
+                            frequently asked first (months_seen, then id).
+                            From files: file order, applied after --theme.
+
+    --db PATH               SQLite file. Default: backend/tcf.db. Read directly
+                            with sqlite3, so DATABASE_URL is ignored. Only
+                            opened for --from-db and --vocab db.
+
+    --no-examples           leave the worked examples out of the instructions,
+                            to measure whether they still earn their tokens.
+
+    -o, --output PATH       where the labels go. Default: <input stem>_jev.jsonl
+                            beside the first input file, or db_jev.jsonl in
+                            the current directory for --from-db. `-o -`
+                            writes to stdout instead.
+
+Output
+------
+Labels are always written - to the default path above, to -o PATH, or to
+stdout with `-o -`. The report is printed as well whenever a gold field is
+found. An existing file at that path is overwritten.
+
+Each label row is {"id", "<task>": label, "model", "confidence"}. The label is
+null when Jev picked "(none of these fits)".
+
+The report prints overall accuracy and the number declined; then accuracy and
+coverage at confidence floors 0.0, 0.5, 0.7, 0.8, 0.85, 0.9 and 0.95; then the
+ten most confident disagreements, which are worth reading as an audit of the
+gold as much as of the model.
+
+Progress, warnings and the report go to stderr, so `-o -` gives clean JSONL.
+A warning is printed when the gold's labels are not among the options offered,
+because scoring would then measure the taxonomy change, not the model.
 
 Input
 -----
@@ -157,28 +251,44 @@ def read_db(db: sqlite3.Connection, task: str, tache: int, unlabelled: bool,
 
 # ------------------------------------------------------------ vocabulary ----
 
-def theme_options(db: sqlite3.Connection | None, tache: int) -> dict[str, str]:
-    """{theme: description} - names from the database, prose from the rules.
+def vocabulary(tache: int) -> dict[str, list[str]]:
+    """llm_tasks.VOCABULARY - the file load_vocabulary.py loads the tables from.
+
+    Reading it directly means an edit to the vocabulary can be measured before
+    it is loaded, which is when a measurement is most useful. It is Task 2's
+    vocabulary only, the same mapping load_vocabulary.py makes.
+    """
+    from llm_tasks import VOCABULARY
+    if tache != 2:
+        sys.exit(f"llm_tasks.VOCABULARY is the Task 2 vocabulary; for "
+                 f"--tache {tache} use --vocab db")
+    return VOCABULARY
+
+
+def db_theme_names(db: sqlite3.Connection, tache: int) -> list[str]:
+    return [n for (n,) in db.execute(
+        "select name from themes where tache = ? order by name", (tache,))]
+
+
+def theme_options(names: list[str]) -> dict[str, str]:
+    """{theme: description} - the names given, prose from the rules.
 
     Both halves on purpose. RULES_THEME carries a real description per theme,
-    which is exactly what Jev's criteria want, but its headings are prose and
-    three of them trail the word "covers". Taking names from the database and
-    matching descriptions onto them means a drift between the two shows up as a
-    missing description rather than as a silently wrong option.
+    which is exactly what Jev's criteria want, but its headings are prose.
+    Taking the names from the vocabulary and matching descriptions onto them
+    means a drift between the two shows up as a missing description rather
+    than as a silently wrong option. `covers` is still tolerated after a
+    heading, for older copies of the rules.
     """
     from llm_tasks import RULES_THEME
 
     described: dict[str, str] = {}
-    body = RULES_THEME.split("THEME (", 1)[-1]
+    body = re.split(r"THEMES? \(", RULES_THEME, maxsplit=1)[-1]
     for line in body.splitlines():
-        m = re.match(r"^([A-Z][^:]{2,45}?)(?:\s+covers)?:\s+(.+)$", line.strip())
+        m = re.match(r"^([A-Za-z][^:]{2,45}?)(?:\s+covers)?:\s+(.+)$", line.strip())
         if m:
             described[m.group(1).strip()] = m.group(2).strip()
 
-    if db is None:
-        return described
-    names = [n for (n,) in db.execute(
-        "select name from themes where tache = ? order by name", (tache,))]
     out = {n: described.get(n, n) for n in names}
     missing = [n for n in names if n not in described]
     if missing:
@@ -188,7 +298,7 @@ def theme_options(db: sqlite3.Connection | None, tache: int) -> dict[str, str]:
 
 
 def core_subject_options(db: sqlite3.Connection, tache: int) -> dict[str, dict[str, str]]:
-    """{theme: {subject: description}} from the database.
+    """{theme: {subject: description}} from the database (--vocab db).
 
     The label is its own description: the vocabulary is already short English
     noun phrases, which is most of the signal. Adding real descriptions is the
@@ -267,24 +377,24 @@ def report(results: list[dict], field: str) -> None:
     declined = sum(r["label"] is None for r in scored)
     print(f"\nscored against `{field}`: {len(scored)} row(s)   "
           f"accuracy {right / len(scored) * 100:.1f}% ({right}/{len(scored)})   "
-          f"declined {declined}")
+          f"declined {declined}", file=sys.stderr)
 
-    print(f"\n{'confidence >=':>14} {'kept':>6} {'coverage':>9} {'accuracy':>9}")
+    print(f"\n{'confidence >=':>14} {'kept':>6} {'coverage':>9} {'accuracy':>9}", file=sys.stderr)
     for t in (0.0, 0.5, 0.7, 0.8, 0.85, 0.9, 0.95):
         kept = [r for r in scored if r["confidence"] >= t]
         if not kept:
             continue
         acc = sum(r["label"] == r["gold"] for r in kept) / len(kept)
         print(f"{t:>14.2f} {len(kept):>6} {len(kept) / len(scored) * 100:>8.1f}% "
-              f"{acc * 100:>8.1f}%")
+              f"{acc * 100:>8.1f}%", file=sys.stderr)
 
     wrong = [r for r in scored if r["label"] != r["gold"]]
     if wrong:
         print("\nmost confident disagreements - what any threshold would let "
-              "through, and worth reading as an audit of the gold too:")
+              "through, and worth reading as an audit of the gold too:", file=sys.stderr)
         for r in sorted(wrong, key=lambda r: -r["confidence"])[:10]:
             said = "(declined)" if r["label"] is None else repr(r["label"])
-            print(f"  {r['confidence']:.2f}  said {said:32} gold {r['gold']!r}")
+            print(f"  {r['confidence']:.2f}  said {said:32} gold {r['gold']!r}", file=sys.stderr)
 
 
 # ------------------------------------------------------------------ main ----
@@ -299,9 +409,10 @@ def main() -> None:
                     help="read questions from the database instead of files")
     ap.add_argument("--unlabelled", action="store_true",
                     help="--from-db: questions missing this label, to produce new ones")
-    ap.add_argument("--vocab", metavar="input|PATH",
-                    help="take the options from a file's labels rather than from "
-                         "the current vocabulary; `input` means the input files")
+    ap.add_argument("--vocab", metavar="db|input|PATH",
+                    help="where the options come from. Default llm_tasks."
+                         "VOCABULARY; `db` the tables; `input` the input files' "
+                         "labels; PATH another file's labels")
     ap.add_argument("--field", help="which label field is the gold (default: detect)")
     ap.add_argument("--tache", type=int, default=2)
     ap.add_argument("--theme", help="one theme only")
@@ -309,11 +420,19 @@ def main() -> None:
     ap.add_argument("--db", type=Path, default=DEFAULT_DB)
     ap.add_argument("--no-examples", action="store_true",
                     help="drop the worked examples from the instructions")
-    ap.add_argument("-o", "--output", type=Path)
+    ap.add_argument("-o", "--output",
+                    help="default <input stem>_jev.jsonl, or db_jev.jsonl with "
+                         "--from-db; `-` for stdout")
     args = ap.parse_args()
 
     if bool(args.input) == bool(args.from_db):
         ap.error("give input files, or --from-db, but not both")
+    # beside the first input, the way llm.py names its outputs
+    if args.output is None:
+        args.output = (Path("db_jev.jsonl") if args.from_db else
+                       args.input[0].with_name(f"{args.input[0].stem}_jev.jsonl"))
+    elif args.output != "-":
+        args.output = Path(args.output)
     if not os.environ.get("TYPESAFE_API_KEY"):
         sys.exit("TYPESAFE_API_KEY is not set.\n  export TYPESAFE_API_KEY=...")
     try:
@@ -322,11 +441,10 @@ def main() -> None:
         sys.exit("pip install typesafe-sdk")
 
     db = None
-    if args.from_db or args.vocab in (None, "input") or args.task == "core_subject":
-        if args.db.exists():
-            db = sqlite3.connect(args.db)
-        elif args.from_db:
+    if args.from_db or args.vocab == "db":
+        if not args.db.exists():
             sys.exit(f"no database at {args.db}")
+        db = sqlite3.connect(args.db)
 
     # ---- questions ----
     if args.from_db:
@@ -344,7 +462,13 @@ def main() -> None:
 
     # ---- options ----
     per_theme: dict[str, dict[str, str]] | None = None
-    if args.vocab:
+    if args.vocab == "db":
+        if args.task == "theme":
+            options = theme_options(db_theme_names(db, args.tache))
+        else:
+            per_theme = core_subject_options(db, args.tache)
+            options = {}
+    elif args.vocab:
         src = rows if args.vocab == "input" else read_files([Path(args.vocab)], args.task)[0]
         field = args.field or next(
             (f for f in (args.task,) + LABEL_FIELDS if any(f in r for r in src)), None)
@@ -354,9 +478,14 @@ def main() -> None:
         options = options_from_rows(src, field)
         gold_field = gold_field or field
     elif args.task == "theme":
-        options = theme_options(db, args.tache)
+        options = theme_options(list(vocabulary(args.tache)))
     else:
-        per_theme = core_subject_options(db, args.tache)
+        # a theme mapped to [] has no vocabulary yet; offering Jev nothing but
+        # "(none of these fits)" would decline every row, so treat it as absent
+        # an option's description is its note when it has one, else its name
+        from llm_tasks import subject_notes
+        per_theme = {th: {x: subject_notes(th).get(x, x) for x in subs}
+                     for th, subs in vocabulary(args.tache).items() if subs}
         options = {}
 
     if per_theme is not None:
@@ -414,20 +543,19 @@ def main() -> None:
     if gold_field:
         report(results, gold_field)
 
-    if args.output or not gold_field:
-        fh = args.output.open("w", encoding="utf-8") if args.output else sys.stdout
-        try:
-            for r in results:
-                # the same shape llm.py writes, under the task's own field name
-                json.dump({"id": r["id"], args.task: r["label"],
-                           "model": r["model"], "confidence": r["confidence"]},
-                          fh, ensure_ascii=False)
-                fh.write("\n")
-        finally:
-            if args.output:
-                fh.close()
-                print(f"wrote {len(results):,} row(s) to {args.output}", file=sys.stderr)
-
+    to_file = args.output != "-"
+    fh = args.output.open("w", encoding="utf-8") if to_file else sys.stdout
+    try:
+        for r in results:
+            # the same shape llm.py writes, under the task's own field name
+            json.dump({"id": r["id"], args.task: r["label"],
+                       "model": r["model"], "confidence": r["confidence"]},
+                      fh, ensure_ascii=False)
+            fh.write("\n")
+    finally:
+        if to_file:
+            fh.close()
+            print(f"wrote {len(results):,} row(s) to {args.output}", file=sys.stderr)
 
 if __name__ == "__main__":
     main()

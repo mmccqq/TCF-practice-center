@@ -72,7 +72,7 @@ A fresh database is empty. Fill it from the admin system (below), or locally:
 ```bash
 cd questions_processing
 python3 scraper_reussir.py crawl && python3 scraper_reussir.py parse
-cd ../backend && .venv/bin/python backfill_questions.py --dry-run
+cd .. && backend/.venv/bin/python questions_processing/backfill_questions.py --dry-run
 ```
 
 ## Configuration
@@ -130,9 +130,6 @@ backend/
     routers/         questions, auth, progress, admin, admin_review, admin_jobs
     llm_runner.py    labelling jobs on a background thread
     scrape_runner.py scrape → parse → load, in memory
-  backfill_questions.py   scraper JSONL → the three question layers
-  load_vocabulary.py      llm_tasks.VOCABULARY → themes / core_subjects
-  load_labels.py          labelling output → fingerprints
   export_questions.py     questions → JSONL for local tooling
   make_admin.py           grant or revoke admin
   migrations/             Alembic; every schema change since the first deploy
@@ -145,6 +142,9 @@ questions_processing/
   deduplication.py normalise + SHA-256 fingerprint; TF-IDF and embedding tiers
   llm.py           provider layer, chunking, resume, batch API
   llm_tasks.py     prompts, schemas and the controlled vocabulary
+  backfill_questions.py   scraper JSONL → the three question layers
+  load_vocabulary.py      llm_tasks.VOCABULARY → themes / core_subjects
+  load_labels.py          labelling output → fingerprints
 ```
 
 `questions_processing/` is copied into the Docker image because the admin system

@@ -26,7 +26,8 @@ from . import graph as lg
 from . import store
 from .agent import Config
 
-D = dict(is_new=False, rejected_candidates=[], confidence=0.8, reasoning="r",
+D = dict(request_clause="rc", decisive_features="df", rule_applied="none",
+         is_new=False, rejected_candidates=[], confidence=0.8, reasoning="r",
          theme_looks_wrong=False, suggested_theme="")
 
 
@@ -116,12 +117,13 @@ def ctx(monkeypatch):
 def run(request, ctx):
     db, q, subs, themes = ctx
 
-    def go(script, **cfg):
+    def go(script, question=None, **cfg):
+        q_ = question or q
         c = Config(**cfg)
         if request.param == "plain":
-            return plain.label_question(q, db, FakeIndex(),
+            return plain.label_question(q_, db, FakeIndex(),
                                         FakeClient(script), c, subs, themes)
-        return lg.label_question(q, db, FakeIndex(), FakeClient([]), c,
+        return lg.label_question(q_, db, FakeIndex(), FakeClient([]), c,
                                  subs, themes,
                                  model=ScriptedChat(script=[list(t)
                                                             for t in script]))
@@ -191,3 +193,95 @@ def test_defer_is_terminal(run):
     assert r["action"] == "defer_to_human"
     assert r["agent_core_subject"] is None
     assert r["defer_reason"] == "ambiguous"
+
+
+def test_phase2_compares_against_the_classifier_when_given(run, ctx):
+    """Routed rows carry Jev's answer and no bank label: phase 2 must still
+    happen, against Jev, and "agrees with the bank" must stay None."""
+    _, q, _, _ = ctx
+    routed = {**q, "core_subject": None, "phase2_label": "community lessons",
+              "phase2_source": "jev"}
+    r = run([
+        [call("find_similar", {"query": "x", "k": 2}, "1")],
+        [call("submit_decision", {**D, "core_subject": "lessons",
+                                  "evidence_ids": [111]}, "2")],
+        [call("submit_decision", {**D, "core_subject": "community lessons",
+                                  "evidence_ids": [111]}, "3")],
+    ], question=routed)
+    assert r["phase2_against"] == "jev"
+    assert r["blind_core_subject"] == "lessons"
+    assert r["agent_core_subject"] == "community lessons"
+    assert r["revised_in_phase2"] is True
+    assert r["agrees_with_bank"] is None
+
+
+def test_no_label_anywhere_means_no_phase2(run, ctx):
+    _, q, _, _ = ctx
+    bare = {**q, "core_subject": None}
+    r = run([
+        [call("find_similar", {"query": "x", "k": 1}, "1")],
+        [call("submit_decision", {**D, "core_subject": "lessons",
+                                  "evidence_ids": [111]}, "2")],
+    ], question=bare)
+    assert r["phase2_against"] is None
+    assert r["revised_in_phase2"] is None        # None = phase 2 never ran
+
+
+def test_sample_questions_never_returns_the_question_itself():
+    """The first gold run leaked: 20 of 32 questions got their own row - and
+    so the bank's label - back from sample_questions, and 16 of those 20
+    answered with that label."""
+    db = store.session()
+    q = next((x for x in store.queue(db, limit=50) if x["core_subject"]), None)
+    if q is None:
+        pytest.skip("no labelled question")
+    everyone = store.sample_questions(db, q["core_subject"], n=500)
+    others = store.sample_questions(db, q["core_subject"], n=500, exclude=q["f_id"])
+    assert q["f_id"] in {r["f_id"] for r in everyone}
+    assert q["f_id"] not in {r["f_id"] for r in others}
+    assert len(others) == len(everyone) - 1
+
+
+def test_analysis_fields_reach_the_report(run):
+    r = run([
+        [call("find_similar", {"query": "x", "k": 1}, "1")],
+        [call("submit_decision", {**D, "core_subject": "lessons",
+                                  "decisive_features": "cinema named; horaires",
+                                  "rule_applied": "films in cinema",
+                                  "evidence_ids": [111]}, "2")],
+        [call("submit_decision", {**D, "core_subject": "lessons",
+                                  "decisive_features": "cinema named; horaires",
+                                  "rule_applied": "films in cinema",
+                                  "evidence_ids": [111]}, "3")],
+    ])
+    assert r["decisive_features"] == "cinema named; horaires"
+    assert r["rule_applied"] == "films in cinema"
+    assert r["request_clause"] == "rc"
+
+
+def test_schema_puts_the_analysis_before_the_label():
+    """Structured output is written in schema order - the analysis has to come
+    first or it becomes a justification of a label already chosen."""
+    from .tools import TOOLS
+    props = list(next(t for t in TOOLS if t["name"] == "submit_decision")
+                 ["parameters"]["properties"])
+    assert props.index("decisive_features") < props.index("core_subject")
+    assert props.index("rule_applied") < props.index("core_subject")
+
+
+def test_instructions_carry_the_shared_method():
+    """The METHOD comes from RULES_CORE_SUBJECT, so it cannot drift from what
+    llm.py and jev_labels.py tell their models."""
+    from .agent import PHASE1
+    assert "Find the request clause" in PHASE1
+    assert "never overrides a note" in PHASE1
+
+
+def test_prompt_shows_the_extracted_hints():
+    from .agent import _prompt
+    q = {"text": "Je suis un(e) collègue. Je viens de voir un film au cinéma. "
+                 "Vous me demandez des informations (histoire, acteurs, "
+                 "horaires, etc.) .", "theme": "Media & reading"}
+    p = _prompt(q, [], [])
+    assert "Hints: histoire, acteurs, horaires" in p
+    assert "Request clause: Vous me demandez des informations" in p

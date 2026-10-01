@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Backfill the raw_questions, fingerprints and list_questions tables.
 
-    backend/.venv/bin/python backend/backfill_questions.py --dry-run
-    backend/.venv/bin/python backend/backfill_questions.py
-    backend/.venv/bin/python backend/backfill_questions.py --tache 2
+    backend/.venv/bin/python questions_processing/backfill_questions.py --dry-run
+    backend/.venv/bin/python questions_processing/backfill_questions.py
+    backend/.venv/bin/python questions_processing/backfill_questions.py --tache 2
 
     # against Neon, same as the other backend scripts
-    DATABASE_URL='postgresql+psycopg://...' backend/.venv/bin/python backend/backfill_questions.py
+    DATABASE_URL='postgresql+psycopg://...' backend/.venv/bin/python questions_processing/backfill_questions.py
 
 Steps 2 and 3 of "Core question set design.md". Reads the same files seed.py
 reads and writes all three lower layers:
@@ -53,9 +53,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 PROJECT = ROOT.parent
+# `app` lives in backend/. This script used to sit there too, so ROOT was
+# enough; since the move to questions_processing/ it has to be added.
+BACKEND = PROJECT / "backend"
 DATA_DIR = PROJECT / "questions_processing"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(PROJECT))
+sys.path.insert(0, str(BACKEND))
 
 from app.db import SessionLocal                          # noqa: E402
 from app.models import Fingerprint, ListQuestion, RawQuestion   # noqa: E402

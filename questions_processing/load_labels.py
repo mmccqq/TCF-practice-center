@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Load llm.py's theme/abstract/core_subject output into the fingerprints table.
 
-    backend/.venv/bin/python backend/load_labels.py out_theme.jsonl
-    backend/.venv/bin/python backend/load_labels.py --dry-run out_*.jsonl
+    backend/.venv/bin/python questions_processing/load_labels.py out_theme.jsonl
+    backend/.venv/bin/python questions_processing/load_labels.py --dry-run out_*.jsonl
 
     # against Neon, same as the other backend scripts
-    DATABASE_URL='postgresql+psycopg://...' backend/.venv/bin/python backend/load_labels.py ...
+    DATABASE_URL='postgresql+psycopg://...' backend/.venv/bin/python questions_processing/load_labels.py ...
 
 Input is any JSONL with `id` and one answer field - `theme`, `abstract` or
 `core_subject`, whichever llm.py wrote. The column is chosen from that field
@@ -50,8 +50,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 PROJECT = ROOT.parent
+# `app` lives in backend/. This script used to sit there too, so ROOT was
+# enough; since the move to questions_processing/ it has to be added.
+BACKEND = PROJECT / "backend"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(PROJECT))
+sys.path.insert(0, str(BACKEND))
 
 from app.db import SessionLocal                                  # noqa: E402
 from app.models import CoreSubject, Fingerprint, RawQuestion, Theme  # noqa: E402

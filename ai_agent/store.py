@@ -44,7 +44,7 @@ from sqlalchemy.orm import Session  # noqa: E402
 
 from app.db import SessionLocal  # noqa: E402
 from app.models import (CoreSubject, Fingerprint, FingerprintEmbedding,  # noqa: E402
-                        Theme)
+                        RawQuestion, Theme)
 
 DEFAULT_MODEL = "text-embedding-3-small"
 DEFAULT_SOURCE = "text"      # the other option is "abstract"
@@ -83,8 +83,71 @@ def subjects(db: Session, theme: str, tache: int = DEFAULT_TACHE
     return [{"name": n, "uses": int(c)} for n, c in rows]
 
 
+# --- the same vocabulary, from llm_tasks.VOCABULARY rather than the tables ---
+#
+# llm_tasks.py is what load_vocabulary.py loads the tables from, and it is what
+# jev_labels.py offers by default. Offering the agent the same list is what
+# makes "the agent vs Jev on the rows Jev was unsure about" a fair comparison -
+# and it lets a vocabulary edit be measured before it is loaded.
+
+def llm_tasks():
+    """questions_processing/llm_tasks.py, the one home of the vocabulary, the
+    subject notes and the labelling METHOD."""
+    qp = str(PROJECT / "questions_processing")
+    if qp not in sys.path:
+        sys.path.insert(0, qp)
+    import llm_tasks as module
+    return module
+
+
+def _vocabulary() -> dict[str, list[str]]:
+    return llm_tasks().VOCABULARY
+
+
+def vocab_themes() -> list[str]:
+    return sorted(_vocabulary())
+
+
+def vocab_subjects(db: Session, theme: str, tache: int = DEFAULT_TACHE
+                   ) -> list[dict]:
+    """VOCABULARY's subjects for a theme, with usage counts from the bank.
+
+    A subject the bank has never used shows 0 - which is true, and is the
+    signal that sample_questions will find nothing under it.
+    """
+    names = _vocabulary().get(theme, [])
+    notes = llm_tasks().subject_notes(theme)
+    counts = dict(db.execute(
+        select(CoreSubject.name, func.count(Fingerprint.id))
+        .join(Theme, CoreSubject.theme_id == Theme.id)
+        .join(Fingerprint, Fingerprint.core_subject_id == CoreSubject.id)
+        .where(Theme.tache == tache, Theme.name == theme)
+        .group_by(CoreSubject.name)).all())
+    rows = [{"name": n, "uses": int(counts.get(n, 0)),
+             **({"note": notes[n]} if n in notes else {})} for n in names]
+    return sorted(rows, key=lambda r: (-r["uses"], r["name"]))
+
+
+def resolve_ids(db: Session, ids: Iterable[str]) -> dict[str, int]:
+    """Question ids as label files carry them -> fingerprint ids.
+
+    Two shapes arrive: the scrapers' 13-digit id (what a file-based Jev run
+    writes) and a bare fingerprint id (what a --from-db run writes).
+    """
+    ids = [str(i) for i in ids]
+    out = dict(db.execute(select(RawQuestion.id, RawQuestion.f_id)
+                          .where(RawQuestion.id.in_(ids))).all())
+    rest = [i for i in ids if i not in out and i.isdigit() and len(i) < 13]
+    if rest:
+        found = set(db.scalars(select(Fingerprint.id)
+                               .where(Fingerprint.id.in_([int(i) for i in rest]))))
+        out.update({i: int(i) for i in rest if int(i) in found})
+    return out
+
+
 def sample_questions(db: Session, core_subject: str, n: int = 5,
-                     tache: int = DEFAULT_TACHE) -> list[dict]:
+                     tache: int = DEFAULT_TACHE, exclude: int | None = None
+                     ) -> list[dict]:
     """Questions already filed under a subject - the boundary test.
 
     "Does this question belong with these?" is a sharper question than "does
@@ -93,7 +156,11 @@ def sample_questions(db: Session, core_subject: str, n: int = 5,
     rows = db.execute(
         select(Fingerprint.id, Fingerprint.text, Fingerprint.abstract)
         .join(CoreSubject, Fingerprint.core_subject_id == CoreSubject.id)
-        .where(Fingerprint.tache == tache, CoreSubject.name == core_subject)
+        .where(Fingerprint.tache == tache, CoreSubject.name == core_subject,
+               # the question being labelled must never come back as its own
+               # evidence: its row carries the bank's label, which is exactly
+               # the prior phase 1 exists to hide
+               Fingerprint.id != (exclude if exclude is not None else -1))
         .order_by(Fingerprint.months_seen.desc())
         .limit(n)
     ).all()

@@ -108,10 +108,11 @@ def breakdown_blind(text: str, theme: str, subject_names: list[str],
 TOOLS: list[dict[str, Any]] = [
     {"type": "function",
      "name": "question_breakdown",
-     "description": ("Parse this question into role / situation / task / "
-                     "hints, and get an independent opinion on which "
-                     "core_subject fits. Costs one extra model call; worth it "
-                     "when the wording is unusual."),
+     "description": ("A second opinion on which core_subject fits, from a "
+                     "separate model call that never sees any existing label. "
+                     "The request clause and hints are already shown with the "
+                     "question; call this only when you are torn between two "
+                     "subjects. Costs one extra model call."),
      "parameters": {"type": "object", "properties": {},
                     "required": [], "additionalProperties": False},
      "strict": True},
@@ -161,12 +162,32 @@ TOOLS: list[dict[str, Any]] = [
     # ---- terminal ----
     {"type": "function",
      "name": "submit_decision",
-     "description": ("Your final answer. Call this once you have evidence. "
-                     "Set is_new only when no existing subject fits, and then "
-                     "list in rejected_candidates the existing subjects you "
-                     "considered and why each one does not fit."),
+     "description": ("Your final answer. Fill the three analysis fields from "
+                     "your own reading of the question first, then choose the "
+                     "subject. Set is_new only when no existing subject fits, "
+                     "and then list in rejected_candidates the existing "
+                     "subjects you considered and why each one does not fit."),
      "parameters": {"type": "object",
+                    # Order matters: with strict structured output the model
+                    # writes fields in schema order, so the analysis comes
+                    # BEFORE the label. With `reasoning` after `core_subject`
+                    # alone, the first run justified labels it had already
+                    # copied from the bank.
                     "properties": {
+                        "request_clause": {
+                            "type": "string",
+                            "description": "what the candidate asks about, "
+                                           "in the question's own words"},
+                        "decisive_features": {
+                            "type": "string",
+                            "description": "the facts in the question that "
+                                           "decide between similar subjects: "
+                                           "hints, a named place or venue, "
+                                           "whose home it is"},
+                        "rule_applied": {
+                            "type": "string",
+                            "description": "the subject whose note decided "
+                                           "this, or 'none'"},
                         "core_subject": {"type": "string"},
                         "is_new": {"type": "boolean"},
                         "rejected_candidates": {
@@ -186,7 +207,8 @@ TOOLS: list[dict[str, Any]] = [
                         "reasoning": {"type": "string"},
                         "theme_looks_wrong": {"type": "boolean"},
                         "suggested_theme": {"type": "string"}},
-                    "required": ["core_subject", "is_new",
+                    "required": ["request_clause", "decisive_features",
+                                 "rule_applied", "core_subject", "is_new",
                                  "rejected_candidates", "evidence_ids",
                                  "confidence", "reasoning",
                                  "theme_looks_wrong", "suggested_theme"],
@@ -224,11 +246,12 @@ class ToolBox:
 
     def __init__(self, db, index, client, embed_model: str, helper_model: str,
                  question: dict, subject_names: list[str],
-                 max_find_similar: int = 4):
+                 max_find_similar: int = 4, vocab: str = "vocab"):
         self.db, self.index, self.client = db, index, client
         self.embed_model, self.helper_model = embed_model, helper_model
         self.question, self.subject_names = question, subject_names
         self.max_find_similar = max_find_similar
+        self.vocab = vocab                   # "vocab" = llm_tasks, "db" = tables
         self.find_similar_calls = 0
         self.retrieved: set[int] = set()     # what the model is allowed to cite
         self.extra_calls = 0
@@ -275,14 +298,17 @@ class ToolBox:
                                 "text": h["text"][:160]} for h in hits]}
 
     def _list_subjects(self, theme: str) -> dict:
-        rows = store.subjects(self.db, theme)
+        rows = (store.vocab_subjects(self.db, theme) if self.vocab == "vocab"
+                else store.subjects(self.db, theme))
         if not rows:
-            known = ", ".join(store.themes(self.db))
+            known = ", ".join(store.vocab_themes() if self.vocab == "vocab"
+                              else store.themes(self.db))
             return {"error": f"unknown theme {theme!r}. Valid themes: {known}"}
         return {"theme": theme, "subjects": rows}
 
     def _sample_questions(self, core_subject: str, n: int) -> dict:
-        rows = store.sample_questions(self.db, core_subject, max(1, min(n, 8)))
+        rows = store.sample_questions(self.db, core_subject, max(1, min(n, 8)),
+                                      exclude=self.question["f_id"])
         if not rows:
             return {"error": f"no questions are filed under "
                              f"{core_subject!r} yet"}

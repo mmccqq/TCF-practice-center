@@ -56,10 +56,20 @@ Model comparison. A run can ask two models instead of one. Both sets of answers 
 
 Because the agreed answers and the adjudicated ones live in the same batch, a comparison is applied in a single pass. Loading one model's output, comparing, and then loading the resolved disagreements — three passes over the same questions — is the workflow this replaces.
 
+Agent-assisted labelling. The finer core subject is where a single-shot classifier is weakest: it is a choice among a hundred-plus labels rather than sixteen, and the right answer often depends on what is already filed under each one. Questions the classifier is confident about are applied directly. The rest go to an agent that works the way a reviewer does — it searches the bank for questions close in meaning, reads what is already filed under each candidate label, checks the theme's vocabulary with its usage counts, and only then decides. It writes its own search terms and searches again when the first attempt comes back weak, so a question with unusual wording is not lost to one bad query.
+
+Two rules keep the result worth reading. The agent answers blind: it never sees the bank's current label, or any classifier's suggestion, until it has committed to its own. Only then is it shown what the bank says and asked to keep or revise. This is the model-comparison principle applied inside a single question — two views agreeing only means something if they were formed independently. And every decision must cite the questions it actually retrieved; a decision that cites nothing is sent back for evidence rather than accepted.
+
+The agent never writes to the question bank. A run produces a report: the proposed subject, the evidence behind it, the reasoning, and whether it agrees with what is already there. A new label is a proposal, not an insertion, and follows the same one-click path the review queue already uses. Where a question is genuinely ambiguous the agent is expected to defer rather than invent a label to avoid deciding, and a deferral is recorded as an answer rather than a failure. Each run is bounded by caps on steps, tokens and time, for the same reason a labelling run has a question ceiling.
+
+Already-labelled questions go through the pipeline too, which makes the same run an audit: every disagreement between the agent and the bank is a row worth a person's attention, ranked by how confident the agent was. Retrieval quality is measured rather than assumed — the correct subject appears among a question's five nearest neighbours 79.3% of the time and the correct theme 93.6% — and end-to-end accuracy against a hand-built gold set is in progress.
+
 Export. Any filtered view of the bank downloads as a spreadsheet with every field, for analysis outside the platform.
 
 Behind the scenes
 
 Question data is collected from public TCF Canada practice sources, then cleaned and processed: duplicate detection, frequency counts, and LLM-assisted theme and topic classification against a controlled vocabulary.
+
+Retrieval for the labelling agent runs against an embedding index of the bank held beside the questions themselves, and it is searched exhaustively rather than approximately. At this size the whole corpus is a few megabytes, so every search returns the true nearest neighbours instead of an estimate, and no separate vector service is involved.
 
 The data model separates a scraped sighting from the question it reports. Every sighting is kept; identical questions collapse into one record that owns the labels and the user's progress; a third layer lists each question once per month it appeared in. That separation is what lets the same question show up across eighteen months of the archive while carrying one set of labels and one "practised" state — and it is what makes a frequency ranking honest, since a question two sources both reported in the same month counts once, not twice.

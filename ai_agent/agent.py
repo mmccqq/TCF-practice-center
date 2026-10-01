@@ -32,22 +32,56 @@ instruction it may ignore and becomes a field it cannot fabricate.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 
-from .tools import TERMINAL, TOOLS, ToolBox
+from .tools import TERMINAL, TOOLS, ToolBox, breakdown_slots
 
+def _method() -> str:
+    """The METHOD half of RULES_CORE_SUBJECT - the same reading instructions
+    llm.py and jev_labels.py give their models. Taken from llm_tasks rather
+    than restated, so the three labellers cannot drift apart. Its steps are
+    re-lettered, because they sit inside step 1 below."""
+    from .store import llm_tasks
+    rules = llm_tasks().RULES_CORE_SUBJECT
+    body = rules.split("METHOD", 1)[1].split("OUTPUT FORMAT", 1)[0].strip()
+    body = re.sub(r"^(\d)\.", lambda m: f"({'abcdefgh'[int(m.group(1)) - 1]})",
+                  body, flags=re.M)
+    return "\n".join("   " + line for line in body.splitlines())
+
+
+# The first gold run showed the agent reasoning from precedent: "the retrieved
+# near-duplicates are filed under 'films'", and the bank was wrong. So the
+# order of authority is spelled out: the question, then the notes, then the
+# bank - and the bank never overrides the other two.
 PHASE1 = """\
 You are labelling questions for a TCF Canada speaking question bank.
 
 Find the most suitable core_subject for this question under theme <THEME>.
-Cite the evidence you used.
+
+HOW TO DECIDE, in this order:
+1. Analyse the question itself.
+""" + _method() + """
+   The parenthetical hints at the end of the prompt are the strongest signal
+   for telling similar subjects apart. The request clause and the hints are
+   extracted for you under the question.
+2. Apply the notes. Where the subject list carries a note, that note is the
+   rule for telling those subjects apart, and it decides.
+3. Check the bank. Use find_similar and sample_questions to see which labels
+   are in use and to stay consistent. The bank's labels can be outdated or
+   wrong - especially on the boundaries the notes describe - so a precedent
+   never overrides a note or what the question plainly says. A label that is
+   not in the subject list is not a valid answer, however many examples
+   carry it.
 
 Rules:
+- Fill request_clause, decisive_features and rule_applied from your own
+  reading of the question, before choosing core_subject.
 - Prefer an existing core_subject. Only set is_new when none of them fits,
   and then say in rejected_candidates which ones you considered and why each
   one does not fit.
-- Search before you answer. evidence_ids must contain f_ids that your tool
-  calls actually returned.
+- evidence_ids must contain f_ids your tool calls actually returned - cite
+  the examples you checked, including ones you decided against.
 - The theme is fixed - do not relabel it. If it looks wrong, say so with
   theme_looks_wrong and suggested_theme, and still give your best subject.
 - Deferring is a correct answer when the question is genuinely ambiguous.
@@ -56,12 +90,31 @@ Rules:
 """
 
 PHASE2 = """\
-The question bank currently has this question under core_subject: {current!r}.
+{who}: {current!r}.
 
 That label was produced by a different method and may be right or wrong.
 Keep your answer or revise it, and call submit_decision again with your final
 position. You may use the tools once more if you need to check something.
 """
+
+
+def phase2_message(question: dict) -> tuple[str, str] | tuple[None, None]:
+    """(message, what it compares against) for phase 2, or (None, None).
+
+    A classifier's suggestion wins over the bank's label when both exist: the
+    questions routed here are the ones the classifier was unsure about, and
+    whether the agent agrees with it is the thing being measured. The bank's
+    label is the comparison when re-checking questions already labelled.
+    """
+    if question.get("phase2_label"):
+        return (PHASE2.format(who="A classifier suggested this core_subject",
+                              current=question["phase2_label"]),
+                question.get("phase2_source") or "classifier")
+    if question.get("core_subject"):
+        return (PHASE2.format(who="The question bank currently has this "
+                                  "question under core_subject",
+                              current=question["core_subject"]), "bank")
+    return None, None
 
 
 @dataclass
@@ -74,6 +127,7 @@ class Config:
     max_tokens: int = 60_000                    # per question, both phases
     max_find_similar: int = 4
     phase2: bool = True
+    vocab: str = "vocab"                        # "vocab" llm_tasks | "db" tables
 
 
 @dataclass
@@ -103,8 +157,22 @@ class Trace:
 
 
 def _prompt(question: dict, subjects: list[dict], all_themes: list[str]) -> str:
-    listing = "\n".join(f"  {s['name']} ...... {s['uses']}" for s in subjects)
-    return (f"Question (f_id {question['f_id']}):\n{question['text']}\n\n"
+    listing = "\n".join(f"  {s['name']} ...... {s['uses']}"
+                        + (f"\n      {s['note']}" if s.get("note") else "")
+                        for s in subjects)
+    # The regex slots, pasted rather than offered as a tool: question_breakdown
+    # was called 0 times in 32 questions, and these cost nothing. The hints
+    # are the strongest signal there is, so they go in front of the model.
+    slots = breakdown_slots(question["text"])
+    extracted = ""
+    if slots.get("task"):
+        extracted += f"Request clause: {slots['task'].split('(')[0].strip()}\n"
+    if slots.get("hints"):
+        extracted += f"Hints: {', '.join(h for h in slots['hints'] if h != 'etc.')}\n"
+    # no f_id here: shown its own id, the model cites the question as evidence
+    # for itself (4 of 32 did, in the first gold run)
+    return (f"Question:\n{question['text']}\n"
+            f"{extracted}\n"
             f"Theme: {question['theme']}\n\n"
             f"Existing core_subjects under this theme (name ...... uses):\n"
             f"{listing or '  (none yet)'}\n\n"
@@ -179,7 +247,7 @@ def label_question(question: dict, db, index, client, cfg: Config,
     """One question, both phases. Returns a report row - never writes."""
     names = [s["name"] for s in subjects]
     box = ToolBox(db, index, client, cfg.embed_model, cfg.helper_model,
-                  question, names, cfg.max_find_similar)
+                  question, names, cfg.max_find_similar, cfg.vocab)
     usage, trace = Usage(), Trace()
     instructions = PHASE1.replace("<THEME>", question["theme"])
     history: list = [{"role": "user",
@@ -191,11 +259,10 @@ def label_question(question: dict, db, index, client, cfg: Config,
 
     # ---- phase 2: only when there is something independent to compare to ----
     revised = None
-    if (cfg.phase2 and name == "submit_decision"
-            and question.get("core_subject")
+    p2_msg, p2_against = phase2_message(question) if cfg.phase2 else (None, None)
+    if (p2_msg and name == "submit_decision"
             and usage.total < cfg.max_tokens):
-        history.append({"role": "user",
-                        "content": PHASE2.format(current=question["core_subject"])})
+        history.append({"role": "user", "content": p2_msg})
         n2, a2 = _loop(client, cfg, box, history, usage, trace, instructions)
         if n2 == "submit_decision":
             revised, name, args = dict(a2), n2, a2
@@ -208,10 +275,14 @@ def label_question(question: dict, db, index, client, cfg: Config,
         "f_id": question["f_id"],
         "theme": question["theme"],
         "current_core_subject": question.get("core_subject"),
+        "phase2_against": p2_against,
         "action": name,                       # submit_decision | defer | None
         "blind_action": blind_action,
         "blind_core_subject": (blind or {}).get("core_subject"),
         "agent_core_subject": final.get("core_subject"),
+        "request_clause": final.get("request_clause"),
+        "decisive_features": final.get("decisive_features"),
+        "rule_applied": final.get("rule_applied"),
         "is_new": final.get("is_new"),
         "confidence": final.get("confidence"),
         "reasoning": final.get("reasoning"),

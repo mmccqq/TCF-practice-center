@@ -41,7 +41,7 @@ from langchain_core.messages import (AIMessage, HumanMessage, SystemMessage,
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
-from .agent import PHASE1, PHASE2, Config, _prompt
+from .agent import PHASE1, Config, _prompt, phase2_message
 from .tools import TERMINAL, TOOLS, ToolBox
 
 
@@ -68,7 +68,7 @@ class State(TypedDict):
     action: Optional[str]
     nudged: bool
     steps: list[str]
-    current_core_subject: Optional[str]
+    phase2_msg: Optional[str]
     instructions: str
 
 
@@ -125,9 +125,8 @@ def build(model) -> Any:
                           tool_call_id=call["id"])
 
         if (state["phase"] == 1 and call["name"] == "submit_decision"
-                and state["current_core_subject"]):
-            return {"messages": [ack, HumanMessage(PHASE2.format(
-                        current=state["current_core_subject"]))],
+                and state["phase2_msg"]):
+            return {"messages": [ack, HumanMessage(state["phase2_msg"])],
                     "phase": 2, "blind": args, "action": call["name"],
                     "nudged": False, "steps": steps}
 
@@ -186,18 +185,17 @@ def label_question(question: dict, db, index, client, cfg: Config,
 
     names = [s["name"] for s in subjects]
     box = ToolBox(db, index, client, cfg.embed_model, cfg.helper_model,
-                  question, names, cfg.max_find_similar)
+                  question, names, cfg.max_find_similar, cfg.vocab)
     graph = graph or build(model or chat_model(cfg))
+    p2_msg, p2_against = phase2_message(question) if cfg.phase2 else (None, None)
 
     init: State = {
         "messages": [HumanMessage(_prompt(question, subjects, all_themes))],
         "box": box, "phase": 1, "blind": None, "final": None, "action": None,
         "nudged": False, "steps": [],
-        "current_core_subject": question.get("core_subject"),
+        "phase2_msg": p2_msg,
         "instructions": PHASE1.replace("<THEME>", question["theme"]),
     }
-    if not cfg.phase2:
-        init["current_core_subject"] = None
 
     try:
         # LangGraph's own cap, counted in node visits rather than turns: one
@@ -217,10 +215,14 @@ def label_question(question: dict, db, index, client, cfg: Config,
         "f_id": question["f_id"],
         "theme": question["theme"],
         "current_core_subject": question.get("core_subject"),
+        "phase2_against": p2_against,
         "action": out.get("action") if out.get("final") else None,
         "blind_action": out.get("action"),
         "blind_core_subject": blind.get("core_subject"),
         "agent_core_subject": final.get("core_subject"),
+        "request_clause": final.get("request_clause"),
+        "decisive_features": final.get("decisive_features"),
+        "rule_applied": final.get("rule_applied"),
         "is_new": final.get("is_new"),
         "confidence": final.get("confidence"),
         "reasoning": final.get("reasoning"),
@@ -236,8 +238,11 @@ def label_question(question: dict, db, index, client, cfg: Config,
             None if not question.get("core_subject")
             or out.get("action") != "submit_decision" or not final
             else final.get("core_subject") == question["core_subject"]),
+        # None means phase 2 never ran - the same meaning agent.py gives it.
+        # blind == final is not enough to tell: with no phase 2 they are the
+        # same answer, which is not the same thing as "kept it when asked"
         "revised_in_phase2": (
-            None if not blind or not final
+            None if out.get("phase") != 2 or not blind or not final
             else final.get("core_subject") != blind.get("core_subject")),
         "steps": steps,
         "model_calls": usage["calls"] + box.extra_calls,

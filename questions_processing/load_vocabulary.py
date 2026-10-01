@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Load a task's controlled vocabulary into its themes/core_subjects tables.
 
-    backend/.venv/bin/python backend/load_vocabulary.py --dry-run
-    backend/.venv/bin/python backend/load_vocabulary.py                # tache 2
-    backend/.venv/bin/python backend/load_vocabulary.py --tache 3
+    backend/.venv/bin/python questions_processing/load_vocabulary.py --dry-run
+    backend/.venv/bin/python questions_processing/load_vocabulary.py                # tache 2
+    backend/.venv/bin/python questions_processing/load_vocabulary.py --tache 3
 
     # against Neon, same as the other backend scripts
-    DATABASE_URL='postgresql+psycopg://...' backend/.venv/bin/python backend/load_vocabulary.py
+    DATABASE_URL='postgresql+psycopg://...' backend/.venv/bin/python questions_processing/load_vocabulary.py
 
 Task 2 and Task 3 share the themes and core_subjects tables and are kept
 apart by themes.tache, so `--tache 3` can never disturb Task 2's rows: every
@@ -46,8 +46,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 PROJECT = ROOT.parent
+# `app` lives in backend/. This script used to sit there too, so ROOT was
+# enough; since the move to questions_processing/ it has to be added.
+BACKEND = PROJECT / "backend"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(PROJECT))
+sys.path.insert(0, str(BACKEND))
 
 from app.db import SessionLocal                        # noqa: E402
 from app.models import CoreSubject, Fingerprint, Theme  # noqa: E402
