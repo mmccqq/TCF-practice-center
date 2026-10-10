@@ -285,3 +285,21 @@ def test_prompt_shows_the_extracted_hints():
     p = _prompt(q, [], [])
     assert "Hints: histoire, acteurs, horaires" in p
     assert "Request clause: Vous me demandez des informations" in p
+
+
+def test_token_budget_stops_the_run(run):
+    """Both runtimes stop before a model call once the per-question budget is
+    spent. graph.py had no such check at first - the parity test is why."""
+    r = run([[call("find_similar", {"query": "x", "k": 1}, f"z{i}")]
+             for i in range(20)], max_tokens=1000)          # 1,100 per fake call
+    assert r["action"] is None
+    assert "token budget" in r["steps"][-1]
+    assert r["model_calls"] == 1
+
+
+def test_a_capped_run_still_reports_its_cost(run):
+    """Hitting the step limit must not erase the tokens already spent."""
+    r = run([[call("find_similar", {"query": "x", "k": 1}, f"z{i}")]
+             for i in range(40)], max_steps=3)
+    assert r["action"] is None
+    assert r["total_tokens"] > 0 and r["model_calls"] > 0

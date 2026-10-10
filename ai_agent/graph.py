@@ -16,11 +16,12 @@ empirical question about accuracy and cost, not an architectural preference.
     │ agent │ ──────────────► │ tools │
     │       │ ◄────────────── │       │
     └───┬───┘                 └───────┘
+        │ prose  ──► nudge ──► back to agent
         │ terminal tool
         ▼
-    ┌──────┐  phase 1 done, a current label exists ──► back to agent
-    │ gate │  otherwise ─────────────────────────────► END
-    └──────┘
+    ┌──────┐  phase 1 done, a second opinion to show ──► back to agent
+    │ gate │  pushed back for missing evidence ────────► back to agent
+    └──────┘  otherwise ───────────────────────────────► END
 
 What LangGraph gives you here that the hand-written loop does not:
   * `recursion_limit` - a cap enforced by the runtime, not by your counter
@@ -70,6 +71,7 @@ class State(TypedDict):
     steps: list[str]
     phase2_msg: Optional[str]
     instructions: str
+    halted: bool                  # the token budget ran out
 
 
 def _terminal_call(msg) -> Optional[dict]:
@@ -79,11 +81,23 @@ def _terminal_call(msg) -> Optional[dict]:
     return None
 
 
-def build(model) -> Any:
+def _over(state: State, max_tokens: int | None) -> bool:
+    if not max_tokens:
+        return False
+    u = _usage(state["messages"])
+    return u["input"] + u["output"] > max_tokens
+
+
+def build(model, max_tokens: int | None = None) -> Any:
     """Compile the graph once. `model` is any LangChain chat model with
-    tools already bound."""
+    tools already bound. `max_tokens` is the per-question budget, the same
+    cap agent.py's loop checks before every model call."""
 
     def agent(state: State) -> dict:
+        if _over(state, max_tokens):
+            u = _usage(state["messages"])
+            return {"halted": True, "steps": state["steps"] + [
+                f"stop: token budget ({u['input'] + u['output']})"]}
         msgs = [SystemMessage(state["instructions"])] + state["messages"]
         reply = model.invoke(msgs)
         return {"messages": [reply]}
@@ -124,8 +138,9 @@ def build(model) -> Any:
         ack = ToolMessage(content=json.dumps({"status": "recorded"}),
                           tool_call_id=call["id"])
 
+        # like agent.py: phase 2 only starts if there is budget left for it
         if (state["phase"] == 1 and call["name"] == "submit_decision"
-                and state["phase2_msg"]):
+                and state["phase2_msg"] and not _over(state, max_tokens)):
             return {"messages": [ack, HumanMessage(state["phase2_msg"])],
                     "phase": 2, "blind": args, "action": call["name"],
                     "nudged": False, "steps": steps}
@@ -135,6 +150,8 @@ def build(model) -> Any:
                 "steps": steps}
 
     def route_agent(state: State) -> str:
+        if state.get("halted"):
+            return "stop"
         last = state["messages"][-1]
         if _terminal_call(last):
             return "gate"
@@ -158,7 +175,7 @@ def build(model) -> Any:
     g.add_edge(START, "agent")
     g.add_conditional_edges("agent", route_agent,
                             {"tools": "tools", "gate": "gate",
-                             "nudge": "nudge"})
+                             "nudge": "nudge", "stop": END})
     g.add_edge("tools", "agent")
     g.add_edge("nudge", "agent")
     g.add_conditional_edges("gate", route_gate, {"agent": "agent", END: END})
@@ -186,7 +203,7 @@ def label_question(question: dict, db, index, client, cfg: Config,
     names = [s["name"] for s in subjects]
     box = ToolBox(db, index, client, cfg.embed_model, cfg.helper_model,
                   question, names, cfg.max_find_similar, cfg.vocab)
-    graph = graph or build(model or chat_model(cfg))
+    graph = graph or build(model or chat_model(cfg), cfg.max_tokens)
     p2_msg, p2_against = phase2_message(question) if cfg.phase2 else (None, None)
 
     init: State = {
@@ -195,15 +212,23 @@ def label_question(question: dict, db, index, client, cfg: Config,
         "nudged": False, "steps": [],
         "phase2_msg": p2_msg,
         "instructions": PHASE1.replace("<THEME>", question["theme"]),
+        "halted": False,
     }
 
+    # stream rather than invoke, keeping the state after every step: when the
+    # recursion limit stops the run, the LAST state is what actually happened
+    # - its messages carry the token counts, and any blind answer reached.
+    # Falling back to `init` here reported a capped question as 0 tokens.
+    out = init
     try:
         # LangGraph's own cap, counted in node visits rather than turns: one
         # model turn is agent + (tools | gate), so budget roughly 3x.
-        out = graph.invoke(init, {"recursion_limit": cfg.max_steps * 3})
+        for out in graph.stream(init, {"recursion_limit": cfg.max_steps * 3},
+                                stream_mode="values"):
+            pass
         steps = out["steps"]
     except GraphRecursionError:
-        out, steps = dict(init), init["steps"] + [
+        steps = out["steps"] + [
             f"stop: recursion_limit ({cfg.max_steps * 3} node visits)"]
 
     final = out.get("final") or {}
@@ -217,7 +242,9 @@ def label_question(question: dict, db, index, client, cfg: Config,
         "current_core_subject": question.get("core_subject"),
         "phase2_against": p2_against,
         "action": out.get("action") if out.get("final") else None,
-        "blind_action": out.get("action"),
+        # phase 2 only ever follows a phase-1 submit_decision; reporting the
+        # final action here would say "defer" for a run that submitted blind
+        "blind_action": "submit_decision" if out.get("phase") == 2 else out.get("action"),
         "blind_core_subject": blind.get("core_subject"),
         "agent_core_subject": final.get("core_subject"),
         "request_clause": final.get("request_clause"),

@@ -169,18 +169,31 @@ def sample_questions(db: Session, core_subject: str, n: int = 5,
 
 # ---------------------------------------------------------------- questions --
 
+def _questions(db: Session, *where, order=None, limit: int | None = None
+               ) -> list[dict]:
+    """Questions with their theme and core_subject, in ONE query.
+
+    The joins are written out rather than reached through relationships:
+    `f.theme.name` in a loop is a lazy load per row - the N+1 query problem.
+    queue() used to fetch ids and then look each one up, which was 697 queries
+    for 696 questions; this is one.
+    """
+    q = (select(Fingerprint.id, Fingerprint.text, Fingerprint.abstract,
+                Theme.name, CoreSubject.name)
+         .outerjoin(Theme, Fingerprint.theme_id == Theme.id)
+         .outerjoin(CoreSubject, Fingerprint.core_subject_id == CoreSubject.id)
+         .where(*where))
+    if order is not None:
+        q = q.order_by(order)
+    if limit:
+        q = q.limit(limit)
+    return [{"f_id": i, "text": t, "abstract": a, "theme": th, "core_subject": cs}
+            for i, t, a, th, cs in db.execute(q).all()]
+
+
 def question(db: Session, f_id: int) -> dict | None:
-    row = db.execute(
-        select(Fingerprint.id, Fingerprint.text, Fingerprint.abstract,
-               Theme.name, CoreSubject.name)
-        .outerjoin(Theme, Fingerprint.theme_id == Theme.id)
-        .outerjoin(CoreSubject, Fingerprint.core_subject_id == CoreSubject.id)
-        .where(Fingerprint.id == f_id)
-    ).first()
-    if row is None:
-        return None
-    return {"f_id": row[0], "text": row[1], "abstract": row[2],
-            "theme": row[3], "core_subject": row[4]}
+    rows = _questions(db, Fingerprint.id == f_id)
+    return rows[0] if rows else None
 
 
 def queue(db: Session, tache: int = DEFAULT_TACHE, limit: int | None = None
@@ -192,12 +205,9 @@ def queue(db: Session, tache: int = DEFAULT_TACHE, limit: int | None = None
     Already-labelled questions are included deliberately - re-checking them is
     what produces a silver agreement rate on day one, with no hand-labelling.
     """
-    q = (select(Fingerprint.id)
-         .where(Fingerprint.tache == tache, Fingerprint.theme_id.is_not(None))
-         .order_by(Fingerprint.id))
-    if limit:
-        q = q.limit(limit)
-    return [question(db, i) for i in db.scalars(q)]
+    return _questions(db, Fingerprint.tache == tache,
+                      Fingerprint.theme_id.is_not(None),
+                      order=Fingerprint.id, limit=limit)
 
 
 # --------------------------------------------------------------- embeddings --

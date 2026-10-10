@@ -4,8 +4,9 @@
              vocabulary, and nothing about what anyone else thinks the answer
              is. It routes its own tools and commits.
 
-    PHASE 2  informed.  It is shown the bank's current label and asked to keep
-             or revise.
+    PHASE 2  informed.  It is shown a second opinion - a classifier's
+             suggestion, or the bank's current label - and asked to keep or
+             revise.
 
 Why phase 1 is blind
 --------------------
@@ -231,6 +232,12 @@ def _loop(client, cfg: Config, box: ToolBox, history: list, usage: Usage,
                                         "saw."})})
                     continue
                 trace.note(f"{call.name}")
+                # every function_call needs an output in the history before
+                # the next request, or phase 2's follow-up is rejected by the
+                # API - graph.py's gate node writes the same acknowledgement
+                history.append({"type": "function_call_output",
+                                "call_id": call.call_id,
+                                "output": json.dumps({"status": "recorded"})})
                 return call.name, args
 
             out = box.run(call.name, args)
