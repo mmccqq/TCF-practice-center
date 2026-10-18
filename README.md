@@ -7,6 +7,15 @@ and served as a frequency-ranked core set.
 
 **Live:** [happytcf.onrender.com](https://happytcf.onrender.com)(take 30s to wake the service on Render)
 
+## Architecture
+
+![System overview: React SPA and FastAPI served from one Docker image on Render, Postgres on Neon, LLM providers for labelling](docs/architecture.png)
+
+One Docker image serves the React bundle and the API from a single origin.
+Postgres on Neon holds the four-layer question model. Scraping, labelling and
+review all run from the admin system in the browser.
+
+
 The product claim is compression. 4,386 scraped sightings of Task 2 questions
 collapse into 1,541 distinct questions, which group into **89 core subjects** —
 so a candidate works through the subjects the exam keeps returning to instead of
@@ -39,6 +48,18 @@ raw_questions     one scraped sighting          provenance, internal only
        └─ list_questions   one row per month    what the list page renders
             themes / core_subjects              controlled vocabulary, enforced by FK
 ```
+
+
+![Entity relationships: the question spine, controlled vocabulary, user state and labelling tables](docs/schema.png)
+
+<details>
+<summary>ER diagram (Chen notation)</summary>
+
+![ER diagram in Chen notation](docs/er-diagram-chen.svg)
+
+</details>
+
+
 
 Why it matters: a question that recurs across eighteen months is eighteen rows on
 the timeline sharing **one** fingerprint, so it carries one set of labels and one

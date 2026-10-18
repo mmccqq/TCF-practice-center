@@ -1,0 +1,132 @@
+ <svg xmlns="http://www.w3.org/2000/svg" width="1260" height="910" viewBox="0 0 1260 910" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>TCF Practice Center ER diagram (Chen notation)</title>
+  <defs>
+    <marker id="one" viewBox="0 0 12 10" refX="12" refY="5" markerWidth="12" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M0,0 L12,5 L0,10 z" fill="#1F2937"/>
+    </marker>
+  </defs>
+
+  <rect width="1260" height="910" fill="#FFFFFF"/>
+
+  <text x="40" y="48" font-size="22" font-weight="700" fill="#111827">TCF Practice Center · ER diagram (Chen notation)</text>
+  <text x="40" y="74" font-size="13" fill="#6B7280">Question &amp; user domain. Admin labelling tables (llm_jobs, review_batches, review_items) not shown.</text>
+
+  <!-- ============ lines first, so shapes sit on top of their ends ============ -->
+
+  <!-- total participation: double line (dark wide stroke, white centre) -->
+  <g fill="none" stroke="#1F2937" stroke-width="6">
+    <path d="M790,160 L715,160"/>   <!-- core_subjects == belongs to -->
+    <path d="M250,460 L320,460"/>   <!-- raw_questions == sighting of -->
+    <path d="M980,435 L935,435"/>   <!-- fingerprint_embeddings == embeds -->
+    <path d="M640,760 L640,670"/>   <!-- list_questions == month entry of -->
+  </g>
+  <g fill="none" stroke="#FFFFFF" stroke-width="2.5">
+    <path d="M790,160 L715,160"/>
+    <path d="M250,460 L320,460"/>
+    <path d="M980,435 L935,435"/>
+    <path d="M640,760 L640,670"/>
+  </g>
+
+  <!-- partial participation: single line; arrowhead = the "one" side -->
+  <g fill="none" stroke="#1F2937" stroke-width="1.75">
+    <path d="M565,160 L490,160" marker-end="url(#one)"/>              <!-- belongs to -> themes -->
+    <path d="M400,267 L400,190" marker-end="url(#one)"/>              <!-- labelled with -> themes -->
+    <path d="M478,305 L590,305 L590,420"/>                            <!-- labelled with ~ fingerprints -->
+    <path d="M880,267 L880,190" marker-end="url(#one)"/>              <!-- labelled with -> core_subjects -->
+    <path d="M802,305 L690,305 L690,420"/>                            <!-- labelled with ~ fingerprints -->
+    <path d="M470,460 L540,460" marker-end="url(#one)"/>              <!-- sighting of -> fingerprints -->
+    <path d="M795,435 L740,435" marker-end="url(#one)"/>              <!-- embeds -> fingerprints -->
+    <path d="M640,590 L640,500" marker-end="url(#one)"/>              <!-- month entry of -> fingerprints -->
+    <path d="M160,590 L160,490" marker-end="url(#one)"/>              <!-- represented by -> raw_questions -->
+    <path d="M160,670 L160,790 L550,790"/>                            <!-- represented by ~ list_questions (nullable FK) -->
+    <path d="M740,480 L775,480 L775,655 L810,655"/>                   <!-- fingerprints ~ tracks -->
+    <path d="M950,655 L1020,655"/>                                    <!-- tracks ~ users -->
+  </g>
+
+  <!-- attributes of <tracks> -->
+  <g fill="none" stroke="#1F2937" stroke-width="1.25">
+    <path d="M880,693 L795,752"/>
+    <path d="M880,693 L915,752"/>
+    <path d="M880,693 L1040,752"/>
+    <path d="M880,693 L1165,752"/>
+  </g>
+
+  <!-- ============ entities ============ -->
+  <g fill="#EEF2FB" stroke="#1F2937" stroke-width="1.75">
+    <rect x="310" y="130" width="180" height="60" rx="8"/>   <!-- themes -->
+    <rect x="790" y="130" width="180" height="60" rx="8"/>   <!-- core_subjects -->
+    <rect x="540" y="420" width="200" height="80" rx="8"/>   <!-- fingerprints -->
+    <rect x="70"  y="430" width="180" height="60" rx="8"/>   <!-- raw_questions -->
+    <rect x="550" y="760" width="180" height="60" rx="8"/>   <!-- list_questions -->
+    <rect x="1020" y="625" width="170" height="60" rx="8"/>  <!-- users -->
+    <rect x="980" y="405" width="230" height="60" rx="8"/>   <!-- fingerprint_embeddings (weak: outer) -->
+  </g>
+  <rect x="985" y="410" width="220" height="50" rx="5" fill="none" stroke="#1F2937" stroke-width="1.75"/>  <!-- weak: inner -->
+
+  <g font-size="16" font-weight="500" fill="#111827" text-anchor="middle">
+    <text x="400"  y="160" dy=".35em">themes</text>
+    <text x="880"  y="160" dy=".35em">core_subjects</text>
+    <text x="640"  y="460" dy=".35em">fingerprints</text>
+    <text x="160"  y="460" dy=".35em">raw_questions</text>
+    <text x="640"  y="790" dy=".35em">list_questions</text>
+    <text x="1105" y="655" dy=".35em">users</text>
+    <text x="1095" y="435" dy=".35em">fingerprint_embeddings</text>
+  </g>
+
+  <!-- ============ relationships ============ -->
+  <g fill="#FDF1D0" stroke="#1F2937" stroke-width="1.75">
+    <polygon points="565,160 640,122 715,160 640,198"/>   <!-- belongs to -->
+    <polygon points="322,305 400,267 478,305 400,343"/>   <!-- labelled with (theme) -->
+    <polygon points="802,305 880,267 958,305 880,343"/>   <!-- labelled with (core subject) -->
+    <polygon points="320,460 395,422 470,460 395,498"/>   <!-- sighting of -->
+    <polygon points="552,630 640,590 728,630 640,670"/>   <!-- month entry of -->
+    <polygon points="72,630 160,590 248,630 160,670"/>    <!-- represented by -->
+    <polygon points="810,655 880,617 950,655 880,693"/>   <!-- tracks -->
+    <polygon points="795,435 865,397 935,435 865,473"/>   <!-- embeds (identifying: outer) -->
+  </g>
+  <polygon points="805,435 865,405 925,435 865,465" fill="none" stroke="#1F2937" stroke-width="1.75"/>  <!-- identifying: inner -->
+
+  <g font-size="14" fill="#111827" text-anchor="middle">
+    <text x="640" y="160" dy=".35em">belongs to</text>
+    <text x="400" y="305" dy=".35em">labelled with</text>
+    <text x="880" y="305" dy=".35em">labelled with</text>
+    <text x="395" y="460" dy=".35em">sighting of</text>
+    <text x="640" y="630" dy=".35em">month entry of</text>
+    <text x="160" y="630" dy=".35em">represented by</text>
+    <text x="880" y="655" dy=".35em">tracks</text>
+    <text x="865" y="435" dy=".35em">embeds</text>
+  </g>
+
+  <!-- ============ attributes ============ -->
+  <g fill="#FFFFFF" stroke="#1F2937" stroke-width="1.25">
+    <ellipse cx="795"  cy="770" rx="48" ry="18"/>
+    <ellipse cx="915"  cy="770" rx="56" ry="18"/>
+    <ellipse cx="1040" cy="770" rx="56" ry="18"/>
+    <ellipse cx="1165" cy="770" rx="64" ry="18"/>
+  </g>
+  <g font-size="13" fill="#111827" text-anchor="middle">
+    <text x="795"  y="770" dy=".35em">practiced</text>
+    <text x="915"  y="770" dy=".35em">practiced_at</text>
+    <text x="1040" y="770" dy=".35em">bookmarked</text>
+    <text x="1165" y="770" dy=".35em">bookmarked_at</text>
+  </g>
+  <text x="747" y="818" font-size="12" font-style="italic" fill="#6B7280">‹tracks› is stored as the user_questions table: one row per (user, question)</text>
+
+  <!-- ============ legend ============ -->
+  <line x1="40" y1="858" x2="1220" y2="858" stroke="#E5E7EB" stroke-width="1"/>
+  <g font-size="12.5" fill="#374151">
+    <path d="M40,880 L90,880" stroke="#1F2937" stroke-width="6" fill="none"/>
+    <path d="M40,880 L90,880" stroke="#FFFFFF" stroke-width="2.5" fill="none"/>
+    <text x="100" y="880" dy=".35em">total participation (a NOT NULL foreign key)</text>
+
+    <path d="M420,880 L470,880" stroke="#1F2937" stroke-width="1.75" fill="none"/>
+    <text x="480" y="880" dy=".35em">partial participation</text>
+
+    <path d="M640,880 L690,880" stroke="#1F2937" stroke-width="1.75" fill="none" marker-end="url(#one)"/>
+    <text x="700" y="880" dy=".35em">arrowhead = the “one” side · none = many</text>
+
+    <rect x="960" y="869" width="34" height="22" rx="4" fill="#EEF2FB" stroke="#1F2937" stroke-width="1.5"/>
+    <rect x="964" y="873" width="26" height="14" rx="2" fill="none" stroke="#1F2937" stroke-width="1.5"/>
+    <text x="1004" y="880" dy=".35em">weak entity (double box/diamond)</text>
+  </g>
+</svg>
