@@ -52,12 +52,9 @@ raw_questions     one scraped sighting          provenance, internal only
 
 ![Entity relationships: the question spine, controlled vocabulary, user state and labelling tables](docs/schema.png)
 
-<details>
-<summary>ER diagram (Chen notation)</summary>
 
 ![ER diagram in Chen notation](docs/er-diagram-chen.svg)
 
-</details>
 
 
 
